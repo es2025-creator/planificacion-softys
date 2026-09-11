@@ -1,0 +1,5 @@
+.streamlit/secrets.toml
+secrets_template.toml
+__pycache__/
+*.pyc
+planificacion_reuniones.csv
