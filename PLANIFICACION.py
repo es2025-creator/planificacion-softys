@@ -59,6 +59,7 @@ def cargar_datos():
             "Avisos_Creados": 0, "OM_Creadas": 0, "Numero_Averias": 0, "Lub_Planeados": 0, "Lub_Ejecutados": 0,
             "TPM_Limpieza": 0, "TPM_Inspeccion": 0, "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": ""
         }])
+        df_inicial["Fecha"] = pd.to_datetime(df_inicial["Fecha"]
         guardar_datos(df_inicial)
         return df_inicial
 
