@@ -20,6 +20,39 @@ st.title("🏭 Sistema Integrado de Planificación y TPM")
 st.markdown("Control de Avisos, OM, Especialidades, Lubricación y Gestión de Pendientes por Línea.")
 
 # ===============================
+# LOGIN (usuario y contraseña)
+# ===============================
+def verificar_login():
+    if st.session_state.get("autenticado", False):
+        return True
+
+    st.subheader("🔒 Acceso restringido")
+    with st.form("form_login"):
+        usuario_input = st.text_input("Usuario")
+        clave_input = st.text_input("Contraseña", type="password")
+        entrar = st.form_submit_button("Ingresar")
+
+    if entrar:
+        usuario_ok = usuario_input == st.secrets["auth"]["usuario"]
+        clave_ok = clave_input == st.secrets["auth"]["password"]
+        if usuario_ok and clave_ok:
+            st.session_state["autenticado"] = True
+            st.rerun()
+        else:
+            st.error("Usuario o contraseña incorrectos.")
+
+    return False
+
+if not verificar_login():
+    st.stop()
+
+with st.sidebar:
+    st.write("")
+    if st.button("🚪 Cerrar sesión"):
+        st.session_state["autenticado"] = False
+        st.rerun()
+
+# ===============================
 # CONEXIÓN A GOOGLE SHEETS (base de datos persistente)
 # ===============================
 COLUMNAS_REQUERIDAS = [
@@ -59,7 +92,6 @@ def cargar_datos():
             "Avisos_Creados": 0, "OM_Creadas": 0, "Numero_Averias": 0, "Lub_Planeados": 0, "Lub_Ejecutados": 0,
             "TPM_Limpieza": 0, "TPM_Inspeccion": 0, "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": ""
         }])
-        df_inicial["Fecha"] = pd.to_datetime(df_inicial["Fecha"])
         guardar_datos(df_inicial)
         return df_inicial
 
@@ -302,7 +334,66 @@ if not df_linea.empty:
 else:
     st.info("No hay registros en el historial para modificar.")
 
+# ===============================
+# ELIMINAR REGISTRO
+# ===============================
+st.divider()
+st.subheader(f"🗑️ Eliminar un Registro: {linea_activa}")
 
+if not df_linea.empty:
+    fechas_para_borrar = sorted(df_linea["Fecha_Str"].unique(), reverse=True)
 
+    col_del1, col_del2 = st.columns([3, 1])
+    with col_del1:
+        fecha_a_borrar = st.selectbox(
+            "Selecciona la fecha del registro a eliminar (⚠️ acción irreversible):",
+            fechas_para_borrar,
+            key="fecha_borrar"
+        )
+    with col_del2:
+        st.write("")
+        st.write("")
+        confirmar_borrado = st.checkbox("Confirmar", key="check_borrar")
 
+    if st.button("🗑️ Eliminar registro seleccionado", disabled=not confirmar_borrado):
+        indice_a_borrar = df_historico[
+            (df_historico["Fecha"].dt.strftime("%Y-%m-%d") == fecha_a_borrar) &
+            (df_historico["Linea"] == linea_activa)
+        ].index
 
+        df_historico = df_historico.drop(index=indice_a_borrar).reset_index(drop=True)
+        guardar_datos(df_historico)
+
+        st.success(f"🗑️ Registro del {fecha_a_borrar} eliminado correctamente.")
+        st.rerun()
+else:
+    st.info("No hay registros para eliminar en esta línea.")
+
+# ===============================
+# GRÁFICOS
+# ===============================
+st.divider()
+st.header(f"📊 Gráficos: {linea_activa}")
+
+if not df_linea.empty:
+    df_grafico = df_linea.sort_values("Fecha").copy()
+    df_grafico["Fecha_Str"] = df_grafico["Fecha"].dt.strftime("%Y-%m-%d")
+    df_grafico_indexado = df_grafico.set_index("Fecha_Str")
+
+    g1, g2 = st.columns(2)
+
+    with g1:
+        st.markdown("**🔴 Tarjetas por fecha (Rojas / Verdes / Azules)**")
+        st.bar_chart(df_grafico_indexado[["Tarjetas_Rojas", "Tarjetas_Verdes", "Tarjetas_Azules"]])
+
+        st.markdown("**💥 Averías vs Avisos vs OM**")
+        st.line_chart(df_grafico_indexado[["Numero_Averias", "Avisos_Creados", "OM_Creadas"]])
+
+    with g2:
+        st.markdown("**💧 Cumplimiento de Lubricación (Ejecutados vs Planeados)**")
+        st.bar_chart(df_grafico_indexado[["Lub_Planeados", "Lub_Ejecutados"]])
+
+        st.markdown("**⚙️ TPM: Limpieza vs Anomalías Detectadas**")
+        st.line_chart(df_grafico_indexado[["TPM_Limpieza", "TPM_Inspeccion"]])
+else:
+    st.info("No hay suficientes datos para graficar en esta línea todavía.")
