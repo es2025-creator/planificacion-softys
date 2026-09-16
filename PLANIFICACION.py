@@ -106,9 +106,23 @@ def cargar_datos():
 def guardar_datos(df):
     hoja = conectar_sheet()
     df_guardar = df.copy()
-    df_guardar["Fecha"] = df_guardar["Fecha"].astype(str)
+    
+    # 1. Convertir todas las columnas de tipo fecha/tiempo a texto automáticamente
+    for col in df_guardar.select_dtypes(include=['datetime', 'datetimetz']).columns:
+        df_guardar[col] = df_guardar[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Por si acaso, asegurar que tu columna "Fecha" específica sea texto
+    if "Fecha" in df_guardar.columns:
+        df_guardar["Fecha"] = df_guardar["Fecha"].astype(str)
+        
+    # 2. Reemplazar los valores nulos (NaN / NaT) que causan el fallo en JSON por texto vacío
+    df_guardar = df_guardar.fillna("")
+    
     hoja.clear()
-    hoja.update([df_guardar.columns.values.tolist()] + df_guardar.values.tolist())
+    
+    # 3. Enviar los datos limpios (se agrega 'A1' para compatibilidad con versiones nuevas de gspread)
+    datos_completos = [df_guardar.columns.values.tolist()] + df_guardar.values.tolist()
+    hoja.update('A1', datos_completos)
 
 def enviar_correo_preventivo(fecha_prev, linea, tarea):
     try:
