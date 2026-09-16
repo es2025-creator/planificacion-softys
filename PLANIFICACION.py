@@ -111,16 +111,19 @@ def guardar_datos(df):
     for col in df_guardar.select_dtypes(include=['datetime', 'datetimetz']).columns:
         df_guardar[col] = df_guardar[col].dt.strftime('%Y-%m-%d %H:%M:%S')
     
-    # Por si acaso, asegurar que tu columna "Fecha" específica sea texto
     if "Fecha" in df_guardar.columns:
         df_guardar["Fecha"] = df_guardar["Fecha"].astype(str)
         
-    # 2. Reemplazar los valores nulos (NaN / NaT) que causan el fallo en JSON por texto vacío
+    # 2. Reemplazar los valores nulos (NaN / NaT) por texto vacío
     df_guardar = df_guardar.fillna("")
+    
+    # 3. ¡PASO CLAVE! Convertir todo el DataFrame a tipos de objetos nativos de Python
+    # Esto elimina los tipos int64/float64 de NumPy que rompen el JSON
+    df_guardar = df_guardar.astype(object)
     
     hoja.clear()
     
-    # 3. Enviar los datos limpios (se agrega 'A1' para compatibilidad con versiones nuevas de gspread)
+    # 4. Enviar los datos completamente limpios y compatibles
     datos_completos = [df_guardar.columns.values.tolist()] + df_guardar.values.tolist()
     hoja.update('A1', datos_completos)
 
