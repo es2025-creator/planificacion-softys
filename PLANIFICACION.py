@@ -103,55 +103,12 @@ def cargar_datos():
     df["Fecha"] = pd.to_datetime(df["Fecha"])
     return df
 
-import numpy as np
-
 def guardar_datos(df):
     hoja = conectar_sheet()
     df_guardar = df.copy()
-    
-    # 1. Convertir todas las columnas de tipo fecha/tiempo a texto
-    for col in df_guardar.select_dtypes(include=['datetime', 'datetimetz']).columns:
-        df_guardar[col] = df_guardar[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-    
-    if "Fecha" in df_guardar.columns:
-        df_guardar["Fecha"] = df_guardar["Fecha"].astype(str)
-        
-    # 2. Reemplazar valores nulos estándar
-    df_guardar = df_guardar.fillna("")
-    
+    df_guardar["Fecha"] = df_guardar["Fecha"].astype(str)
     hoja.clear()
-    
-    # 3. CONVERSIÓN INFA_LIBLE CELDA POR CELDA:
-    # Pasamos los datos a una lista de listas nativa de Python purificando los tipos de datos.
-    # Si detecta NaN de numpy, float/int de numpy o valores nulos complejos, los convierte a tipos válidos.
-    valores_limpios = []
-    for fila in df_guardar.values.tolist():
-        fila_procesada = []
-        for celda in fila:
-            # Si es nulo (NaN, None, NaT), lo cambiamos por un string vacío
-            if celda is None or (isinstance(celda, float) and np.isnan(celda)) or str(celda) in ['NaN', 'NaT', '<NA>']:
-                fila_procesada.append("")
-            # Si es un entero de numpy, lo forzamos a un int común de Python
-            elif isinstance(celda, (np.integer, int)):
-                fila_procesada.append(int(celda))
-            # Si es un flotante de numpy, lo forzamos a un float común de Python
-            elif isinstance(celda, (np.floating, float)):
-                fila_procesada.append(float(celda))
-            # Si es un booleano de numpy, lo forzamos a un bool común de Python
-            elif isinstance(celda, (np.bool_, bool)):
-                fila_procesada.append(bool(celda))
-            # Cualquier otra cosa (como objetos extraños), la aseguramos como string
-            else:
-                fila_procesada.append(str(celda))
-        valores_limpios.append(fila_procesada)
-    
-    # 4. Unir los nombres de las columnas (como strings) con las filas purificadas
-    columnas = [str(col) for col in df_guardar.columns.values.tolist()]
-    datos_completos = [columnas] + valores_limpios
-    
-    # 5. Enviar a Google Sheets
-    hoja.update('A1', datos_completos)
-
+    hoja.update([df_guardar.columns.values.tolist()] + df_guardar.values.tolist())
 
 def enviar_correo_preventivo(fecha_prev, linea, tarea):
     try:
