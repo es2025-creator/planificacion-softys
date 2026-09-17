@@ -113,10 +113,29 @@ def guardar_datos(df):
 def enviar_correo_preventivo(fecha_prev, linea, tarea):
     try:
         correo_emisor = st.secrets["email"]["usuario"]
-        correo_receptor = st.secrets["email"]["receptor"]
         password_correo = st.secrets["email"]["password"]
         smtp_server = st.secrets["email"].get("smtp_server", "smtp.gmail.com")
         smtp_port = int(st.secrets["email"].get("smtp_port", 587))
+
+        # Busca los correos del mecánico y eléctrico asignados a esta línea
+        # en la sección [email_recipients] de los Secrets.
+        destinatarios_linea = st.secrets.get("email_recipients", {}).get(linea, None)
+
+        if not destinatarios_linea:
+            st.session_state["ultimo_error_mail"] = f"No hay correos configurados para la línea '{linea}' en Secrets."
+            return False
+
+        lista_destinatarios = []
+        if destinatarios_linea.get("mecanico"):
+            lista_destinatarios.append(destinatarios_linea["mecanico"])
+        if destinatarios_linea.get("electrico"):
+            lista_destinatarios.append(destinatarios_linea["electrico"])
+
+        if not lista_destinatarios:
+            st.session_state["ultimo_error_mail"] = f"La línea '{linea}' no tiene correos de mecánico ni eléctrico configurados."
+            return False
+
+        correo_receptor = ", ".join(lista_destinatarios)
 
         msg = MIMEText(f"🚨 ALERTA DE MANTENCIÓN PREVENTIVA:\n\nSe ha programado una mantención para la línea {linea}.\nFecha: {fecha_prev}\nTrabajo a realizar: {tarea}\n\nPor favor gestionar los recursos y herramientas.")
         msg['Subject'] = f"⚠️ Preventivo Programado - Línea {linea} ({fecha_prev})"
@@ -126,7 +145,7 @@ def enviar_correo_preventivo(fecha_prev, linea, tarea):
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()
         server.login(correo_emisor, password_correo)
-        server.sendmail(correo_emisor, correo_receptor, msg.as_string())
+        server.sendmail(correo_emisor, lista_destinatarios, msg.as_string())
         server.quit()
         return True
     except Exception as e:
@@ -139,7 +158,8 @@ df_historico = cargar_datos()
 # SELECTOR DE LÍNEA PRODUCTIVA (BARRA LATERAL)
 # ===============================
 st.sidebar.header("🕹️ Navegación de Pantallas")
-linea_activa = st.sidebar.selectbox("Selecciona la Línea Productiva:", ["PALETIZADO", "LAM 3"])
+LINEAS_DISPONIBLES = ["LAM 1", "LAM 2", "260", "230", "190", "LAM 3", "PALETIZADO"]
+linea_activa = st.sidebar.selectbox("Selecciona la Línea Productiva:", LINEAS_DISPONIBLES)
 
 st.subheader(f"🖥️ Pantalla Actual: Área de {linea_activa}")
 
