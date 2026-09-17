@@ -106,7 +106,16 @@ def cargar_datos():
 def guardar_datos(df):
     hoja = conectar_sheet()
     df_guardar = df.copy()
-    df_guardar["Fecha"] = df_guardar["Fecha"].astype(str)
+
+    # Convierte TODAS las columnas de fecha/hora a texto plano,
+    # para evitar errores al enviar los datos a Google Sheets.
+    for col in df_guardar.columns:
+        if pd.api.types.is_datetime64_any_dtype(df_guardar[col]):
+            df_guardar[col] = df_guardar[col].astype(str)
+
+    # Asegura que no queden valores nulos (NaN/NaT) que tampoco son válidos para Sheets.
+    df_guardar = df_guardar.fillna("")
+
     hoja.clear()
     hoja.update([df_guardar.columns.values.tolist()] + df_guardar.values.tolist())
 
