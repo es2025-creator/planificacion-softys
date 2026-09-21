@@ -16,6 +16,29 @@ st.set_page_config(
     page_icon="🏭"
 )
 
+# ===============================
+# MARCA DE AGUA DE FONDO (ERC)
+# ===============================
+st.markdown("""
+<style>
+.stApp::before {
+    content: "ERC";
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-25deg);
+    font-size: 22vw;
+    font-weight: 900;
+    font-family: Arial, sans-serif;
+    color: rgba(120, 120, 120, 0.07);
+    z-index: 0;
+    pointer-events: none;
+    user-select: none;
+    white-space: nowrap;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🏭 Sistema Integrado de Planificación y TPM")
 st.markdown("Control de Avisos, OM, Especialidades, Lubricación y Gestión de Pendientes por Línea.")
 
@@ -59,7 +82,8 @@ COLUMNAS_REQUERIDAS = [
     "Fecha", "Linea", "Acciones_Dia", "Tareas_Electricas", "Tareas_Mecanicas",
     "Formulario_Mejoras", "Estado", "Tarjetas_Rojas", "Tarjetas_Verdes", "Tarjetas_Azules",
     "Avisos_Creados", "OM_Creadas", "Numero_Averias",
-    "Lub_Planeados", "Lub_Ejecutados", "TPM_Limpieza", "TPM_Inspeccion",
+    "Lub_Planeados_MA", "Lub_Ejecutados_MA", "TPM_Inspeccion_MA", "Observaciones_MA",
+    "Lub_Planeados_MP", "Lub_Ejecutados_MP", "TPM_Inspeccion_MP", "Observaciones_MP",
     "Preventivo_Fecha", "Preventivo_Tarea"
 ]
 
@@ -83,14 +107,18 @@ def cargar_datos():
             "Fecha": str(date.today()), "Linea": "PALETIZADO",
             "Acciones_Dia": "Sistema inicializado correctamente.", "Tareas_Electricas": "Revisión inicial", "Tareas_Mecanicas": "Inspección de polines",
             "Formulario_Mejoras": "", "Estado": "Listo", "Tarjetas_Rojas": 0, "Tarjetas_Verdes": 0, "Tarjetas_Azules": 0,
-            "Avisos_Creados": 0, "OM_Creadas": 0, "Numero_Averias": 0, "Lub_Planeados": 0, "Lub_Ejecutados": 0,
-            "TPM_Limpieza": 0, "TPM_Inspeccion": 0, "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": ""
+            "Avisos_Creados": 0, "OM_Creadas": 0, "Numero_Averias": 0,
+            "Lub_Planeados_MA": 0, "Lub_Ejecutados_MA": 0, "TPM_Inspeccion_MA": 0, "Observaciones_MA": "",
+            "Lub_Planeados_MP": 0, "Lub_Ejecutados_MP": 0, "TPM_Inspeccion_MP": 0, "Observaciones_MP": "",
+            "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": ""
         }, {
             "Fecha": str(date.today()), "Linea": "LAM 3",
             "Acciones_Dia": "Sistema inicializado correctamente.", "Tareas_Electricas": "Revisión inicial", "Tareas_Mecanicas": "Inspección de cadenas",
             "Formulario_Mejoras": "", "Estado": "Listo", "Tarjetas_Rojas": 0, "Tarjetas_Verdes": 0, "Tarjetas_Azules": 0,
-            "Avisos_Creados": 0, "OM_Creadas": 0, "Numero_Averias": 0, "Lub_Planeados": 0, "Lub_Ejecutados": 0,
-            "TPM_Limpieza": 0, "TPM_Inspeccion": 0, "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": ""
+            "Avisos_Creados": 0, "OM_Creadas": 0, "Numero_Averias": 0,
+            "Lub_Planeados_MA": 0, "Lub_Ejecutados_MA": 0, "TPM_Inspeccion_MA": 0, "Observaciones_MA": "",
+            "Lub_Planeados_MP": 0, "Lub_Ejecutados_MP": 0, "TPM_Inspeccion_MP": 0, "Observaciones_MP": "",
+            "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": ""
         }])
         guardar_datos(df_inicial)
         return df_inicial
@@ -233,7 +261,7 @@ with col_alertas2:
 # ===============================
 with st.expander(f"📝 Registrar Nueva Reunión / Turno para {linea_activa}", expanded=True):
     with st.form("form_planificacion", clear_on_submit=True):
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
 
         with c1:
             st.markdown("### 📋 Bitácora General")
@@ -260,16 +288,28 @@ with st.expander(f"📝 Registrar Nueva Reunión / Turno para {linea_activa}", e
             t_azules = st.number_input("Tarjetas Azules", min_value=0, step=1)
 
         with c3:
-            st.markdown("### 💧 Módulo Lubricación y TPM")
-            lub_planeados = st.number_input("Puntos de Lubricación Planeados", min_value=0, step=1)
-            lub_ejecutados = st.number_input("Puntos de Lubricación Ejecutados", min_value=0, step=1)
-            tpm_limpieza = st.number_input("Inspecciones de Limpieza", min_value=0, step=1)
-            tpm_inspeccion = st.number_input("Anomalías Detectadas", min_value=0, step=1)
+            st.markdown("### 💧 Módulo Lubricación y TPM MA")
+            lub_planeados_ma = st.number_input("Puntos de Lubricación Planeados (MA)", min_value=0, step=1, key="lub_plan_ma")
+            lub_ejecutados_ma = st.number_input("Puntos de Lubricación Ejecutados (MA)", min_value=0, step=1, key="lub_ejec_ma")
+            tpm_inspeccion_ma = st.number_input("Anomalías Detectadas (MA)", min_value=0, step=1, key="tpm_insp_ma")
+            observaciones_ma = st.text_area("Observaciones Detectadas (MA)", key="obs_ma")
 
-            st.markdown("---")
-            st.markdown("### 📅 Alerta de Preventivo Técnico")
+        with c4:
+            st.markdown("### 💧 Módulo Lubricación y TPM MP")
+            lub_planeados_mp = st.number_input("Puntos de Lubricación Planeados (MP)", min_value=0, step=1, key="lub_plan_mp")
+            lub_ejecutados_mp = st.number_input("Puntos de Lubricación Ejecutados (MP)", min_value=0, step=1, key="lub_ejec_mp")
+            tpm_inspeccion_mp = st.number_input("Anomalías Detectadas (MP)", min_value=0, step=1, key="tpm_insp_mp")
+            observaciones_mp = st.text_area("Observaciones Detectadas (MP)", key="obs_mp")
+
+        st.markdown("---")
+        st.markdown("### 📅 Alerta de Preventivo Técnico")
+        col_prev1, col_prev2, col_prev3 = st.columns(3)
+        with col_prev1:
             prev_fecha = st.date_input("Fecha Mantención Preventiva", date.today())
+        with col_prev2:
             prev_tarea = st.text_input("Trabajo Preventivo a Realizar")
+        with col_prev3:
+            st.write("")
             enviar_mail = st.checkbox("Enviar alerta por correo al guardar")
 
         st.write("")
@@ -297,10 +337,14 @@ if boton_enviar:
         "Avisos_Creados": avisos_creados,
         "OM_Creadas": om_creadas,
         "Numero_Averias": num_averias,
-        "Lub_Planeados": lub_planeados,
-        "Lub_Ejecutados": lub_ejecutados,
-        "TPM_Limpieza": tpm_limpieza,
-        "TPM_Inspeccion": tpm_inspeccion,
+        "Lub_Planeados_MA": lub_planeados_ma,
+        "Lub_Ejecutados_MA": lub_ejecutados_ma,
+        "TPM_Inspeccion_MA": tpm_inspeccion_ma,
+        "Observaciones_MA": observaciones_ma,
+        "Lub_Planeados_MP": lub_planeados_mp,
+        "Lub_Ejecutados_MP": lub_ejecutados_mp,
+        "TPM_Inspeccion_MP": tpm_inspeccion_mp,
+        "Observaciones_MP": observaciones_mp,
         "Preventivo_Fecha": str(prev_fecha),
         "Preventivo_Tarea": prev_tarea
     }
@@ -340,7 +384,10 @@ if not df_linea.empty:
             st.metric("⚙️ Órdenes de Mantención (OM)", int(registro_dia['OM_Creadas']))
         with det3:
             st.info(f"💡 **Ideas de Mejora:**\n{registro_dia['Formulario_Mejoras']}")
-            st.metric("💧 Puntos Lubricación (Ejecutados / Planeados)", f"{int(registro_dia['Lub_Ejecutados'])} / {int(registro_dia['Lub_Planeados'])}")
+            st.metric("💧 Lubricación MA (Ejecutados / Planeados)", f"{int(registro_dia['Lub_Ejecutados_MA'])} / {int(registro_dia['Lub_Planeados_MA'])}")
+            st.metric("💧 Lubricación MP (Ejecutados / Planeados)", f"{int(registro_dia['Lub_Ejecutados_MP'])} / {int(registro_dia['Lub_Planeados_MP'])}")
+            st.write(f"📝 **Observaciones MA:** {registro_dia['Observaciones_MA']}")
+            st.write(f"📝 **Observaciones MP:** {registro_dia['Observaciones_MP']}")
             st.write(f"📅 **Próximo Preventivo:** {registro_dia['Preventivo_Fecha']}")
             st.write(f"🔧 **Tarea:** {registro_dia['Preventivo_Tarea']}")
 else:
@@ -442,10 +489,13 @@ if not df_linea.empty:
         st.line_chart(df_grafico_indexado[["Numero_Averias", "Avisos_Creados", "OM_Creadas"]])
 
     with g2:
-        st.markdown("**💧 Cumplimiento de Lubricación (Ejecutados vs Planeados)**")
-        st.bar_chart(df_grafico_indexado[["Lub_Planeados", "Lub_Ejecutados"]])
+        st.markdown("**💧 Cumplimiento de Lubricación MA (Ejecutados vs Planeados)**")
+        st.bar_chart(df_grafico_indexado[["Lub_Planeados_MA", "Lub_Ejecutados_MA"]])
 
-        st.markdown("**⚙️ TPM: Limpieza vs Anomalías Detectadas**")
-        st.line_chart(df_grafico_indexado[["TPM_Limpieza", "TPM_Inspeccion"]])
+        st.markdown("**💧 Cumplimiento de Lubricación MP (Ejecutados vs Planeados)**")
+        st.bar_chart(df_grafico_indexado[["Lub_Planeados_MP", "Lub_Ejecutados_MP"]])
+
+        st.markdown("**⚙️ TPM: Anomalías Detectadas (MA vs MP)**")
+        st.line_chart(df_grafico_indexado[["TPM_Inspeccion_MA", "TPM_Inspeccion_MP"]])
 else:
     st.info("No hay suficientes datos para graficar en esta línea todavía.")
