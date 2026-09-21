@@ -107,17 +107,40 @@ def guardar_datos(df):
     hoja = conectar_sheet()
     df_guardar = df.copy()
 
-    # Convierte TODAS las columnas de fecha/hora a texto plano,
-    # para evitar errores al enviar los datos a Google Sheets.
-    for col in df_guardar.columns:
-        if pd.api.types.is_datetime64_any_dtype(df_guardar[col]):
-            df_guardar[col] = df_guardar[col].astype(str)
+    def _sanitizar_valor(v):
+        # Convierte cualquier fecha/hora (Timestamp, date, NaT) a texto plano,
+        # y cualquier valor vacío/nulo a "", para que Google Sheets lo acepte.
+        try:
+            if pd.isna(v):
+                return ""
+        except (TypeError, ValueError):
+            pass
+        if isinstance(v, date):
+            return str(v)
+        # Convierte tipos numéricos de numpy (int64, float64, bool_, etc.)
+        # a tipos nativos de Python, que sí son válidos para enviar a Google Sheets.
+        if hasattr(v, "item"):
+            try:
+                return v.item()
+            except Exception:
+                return str(v)
+        return v
 
-    # Asegura que no queden valores nulos (NaN/NaT) que tampoco son válidos para Sheets.
-    df_guardar = df_guardar.fillna("")
+    for col in df_guardar.columns:
+        df_guardar[col] = df_guardar[col].map(_sanitizar_valor)
+
+    valores = [df_guardar.columns.values.tolist()] + df_guardar.values.tolist()
+
+    # Última red de seguridad: cualquier valor que no sea texto, número,
+    # booleano o vacío, se convierte a texto para evitar errores de envío.
+    tipos_validos = (str, int, float, bool, type(None))
+    valores = [
+        [v if isinstance(v, tipos_validos) else str(v) for v in fila]
+        for fila in valores
+    ]
 
     hoja.clear()
-    hoja.update([df_guardar.columns.values.tolist()] + df_guardar.values.tolist())
+    hoja.update(valores)
 
 def enviar_correo_preventivo(fecha_prev, linea, tarea):
     try:
