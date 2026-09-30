@@ -182,10 +182,17 @@ def guardar_datos(df):
             if filas_previas > len(valores):
                 hoja.batch_clear([f"A{len(valores) + 1}:Z{filas_previas}"])
             break
-        except gspread.exceptions.APIError:
+        except gspread.exceptions.APIError as e:
             if intento == 2:
-                raise
-            time.sleep(2 * (intento + 1))
+                # Streamlit oculta el texto de las excepciones, así que se muestra
+                # aquí el motivo real que devuelve Google.
+                try:
+                    detalle = f"{e.response.status_code} - {e.response.text[:500]}"
+                except Exception:
+                    detalle = str(e)
+                st.error(f"⚠️ Google Sheets rechazó el guardado. Detalle: {detalle}")
+                st.stop()
+            time.sleep(5 * (intento + 1))
 
 def enviar_correo_preventivo(fecha_prev, linea, tarea):
     try:
@@ -379,15 +386,26 @@ df_linea = df_historico[df_historico["Linea"] == linea_activa].copy()
 # ===============================
 st.divider()
 st.header("🔍 Consultar Detalle de un Día Específico")
+
+def etiqueta_registro(i):
+    fila = df_linea.loc[i]
+    texto = str(fila["Acciones_Dia"]).replace("\n", " ")
+    if len(texto) > 90:
+        texto = texto[:90] + "…"
+    return f"{fila['Fecha_Str']} — {texto}"
+
 if not df_linea.empty:
     df_linea["Fecha_Str"] = df_linea["Fecha"].dt.strftime("%Y-%m-%d")
-    fechas_disponibles = sorted(df_linea["Fecha_Str"].unique(), reverse=True)
-    fecha_consulta = st.selectbox("Selecciona la fecha que deseas auditar:", fechas_disponibles)
+    registros_disponibles = list(df_linea.sort_values("Fecha", ascending=False).index)
+    registro_consulta = st.selectbox(
+        "Selecciona la tarea que deseas auditar:",
+        registros_disponibles,
+        format_func=etiqueta_registro,
+        key="registro_consulta"
+    )
 
-    fila_seleccionada = df_linea[df_linea["Fecha_Str"] == fecha_consulta]
-
-    if not fila_seleccionada.empty:
-        registro_dia = fila_seleccionada.iloc[0]  # Corrección de extracción de fila limpia
+    if registro_consulta is not None:
+        registro_dia = df_linea.loc[registro_consulta]
 
         det1, det2, det3 = st.columns(3)
         with det1:
@@ -415,13 +433,6 @@ else:
 # ===============================
 st.divider()
 st.subheader(f"🔄 Gestión de Compromisos y Cumplimiento: {linea_activa}")
-
-def etiqueta_registro(i):
-    fila = df_linea.loc[i]
-    texto = str(fila["Acciones_Dia"]).replace("\n", " ")
-    if len(texto) > 90:
-        texto = texto[:90] + "…"
-    return f"{fila['Fecha_Str']} — {texto}"
 
 if not df_linea.empty:
     df_solo_pendientes = df_linea[df_linea["Estado"] == "Pendiente"]
@@ -517,3 +528,4 @@ if not df_linea.empty:
         st.line_chart(df_grafico_indexado[["TPM_Inspeccion_MA", "TPM_Inspeccion_MP"]])
 else:
     st.info("No hay suficientes datos para graficar en esta línea todavía.")
+
