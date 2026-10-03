@@ -40,6 +40,29 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ===============================
+# COLOR EN CASILLEROS DE TARJETAS (Rojas / Verdes / Azules)
+# ===============================
+st.markdown("""
+<style>
+div[data-testid="stNumberInput"]:has(input[aria-label="Tarjetas Rojas"]) {
+    background-color: rgba(255, 0, 0, 0.18);
+    border-radius: 8px;
+    padding: 6px;
+}
+div[data-testid="stNumberInput"]:has(input[aria-label="Tarjetas Verdes"]) {
+    background-color: rgba(0, 170, 0, 0.18);
+    border-radius: 8px;
+    padding: 6px;
+}
+div[data-testid="stNumberInput"]:has(input[aria-label="Tarjetas Azules"]) {
+    background-color: rgba(0, 110, 255, 0.18);
+    border-radius: 8px;
+    padding: 6px;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🏭 Sistema Integrado de Planificación y TPM")
 st.markdown("Control de Avisos, OM, Especialidades, Lubricación y Gestión de Pendientes por Línea.")
 
@@ -85,7 +108,7 @@ COLUMNAS_REQUERIDAS = [
     "Avisos_Creados", "OM_Creadas", "Numero_Averias",
     "Lub_Planeados_MA", "Lub_Ejecutados_MA", "TPM_Inspeccion_MA", "Observaciones_MA",
     "Lub_Planeados_MP", "Lub_Ejecutados_MP", "TPM_Inspeccion_MP", "Observaciones_MP",
-    "Preventivo_Fecha", "Preventivo_Tarea"
+    "Preventivo_Fecha", "Preventivo_Tarea", "Fecha_Cierre", "Eficiencia_Diaria"
 ]
 
 @st.cache_resource
@@ -111,7 +134,8 @@ def cargar_datos():
             "Avisos_Creados": 0, "OM_Creadas": 0, "Numero_Averias": 0,
             "Lub_Planeados_MA": 0, "Lub_Ejecutados_MA": 0, "TPM_Inspeccion_MA": 0, "Observaciones_MA": "",
             "Lub_Planeados_MP": 0, "Lub_Ejecutados_MP": 0, "TPM_Inspeccion_MP": 0, "Observaciones_MP": "",
-            "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": ""
+            "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": "",
+            "Fecha_Cierre": str(date.today()), "Eficiencia_Diaria": 0
         }, {
             "Fecha": str(date.today()), "Linea": "LAM 3",
             "Acciones_Dia": "Sistema inicializado correctamente.", "Tareas_Electricas": "Revisión inicial", "Tareas_Mecanicas": "Inspección de cadenas",
@@ -119,7 +143,8 @@ def cargar_datos():
             "Avisos_Creados": 0, "OM_Creadas": 0, "Numero_Averias": 0,
             "Lub_Planeados_MA": 0, "Lub_Ejecutados_MA": 0, "TPM_Inspeccion_MA": 0, "Observaciones_MA": "",
             "Lub_Planeados_MP": 0, "Lub_Ejecutados_MP": 0, "TPM_Inspeccion_MP": 0, "Observaciones_MP": "",
-            "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": ""
+            "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": "",
+            "Fecha_Cierre": str(date.today()), "Eficiencia_Diaria": 0
         }])
         guardar_datos(df_inicial)
         return df_inicial
@@ -127,9 +152,12 @@ def cargar_datos():
     df = pd.DataFrame(registros)
     for col in COLUMNAS_REQUERIDAS:
         if col not in df.columns:
-            df[col] = 0 if any(x in col for x in ["Tarjetas", "Avisos", "OM", "Numero", "Lub", "TPM"]) else ""
+            df[col] = 0 if any(x in col for x in ["Tarjetas", "Avisos", "OM", "Numero", "Lub", "TPM", "Eficiencia"]) else ""
     df = df[COLUMNAS_REQUERIDAS]
     df["Fecha"] = pd.to_datetime(df["Fecha"])
+    # Fecha_Cierre puede venir vacía (tarea aún pendiente); se deja como NaT en ese caso.
+    df["Fecha_Cierre"] = pd.to_datetime(df["Fecha_Cierre"], errors="coerce")
+    df["Eficiencia_Diaria"] = pd.to_numeric(df["Eficiencia_Diaria"], errors="coerce").fillna(0)
     # Google Sheets convierte líneas como "190" en números; se normalizan a texto
     # para que coincidan con las opciones del selector de línea.
     df["Linea"] = df["Linea"].astype(str).str.strip()
@@ -194,7 +222,7 @@ def guardar_datos(df):
                 st.stop()
             time.sleep(5 * (intento + 1))
 
-def enviar_correo_preventivo(fecha_prev, linea, tarea):
+def enviar_correo_preventivo(fecha_prev, linea, tarea, acciones_dia=""):
     try:
         correo_emisor = st.secrets["email"]["usuario"]
         password_correo = st.secrets["email"]["password"]
@@ -221,7 +249,9 @@ def enviar_correo_preventivo(fecha_prev, linea, tarea):
 
         correo_receptor = ", ".join(lista_destinatarios)
 
-        msg = MIMEText(f"🚨 ALERTA DE MANTENCIÓN PREVENTIVA:\n\nSe ha programado una mantención para la línea {linea}.\nFecha: {fecha_prev}\nTrabajo a realizar: {tarea}\n\nPor favor gestionar los recursos y herramientas.")
+        bloque_acciones = f"\n\nAcciones del Día / Compromisos registrados:\n{acciones_dia}" if acciones_dia else ""
+
+        msg = MIMEText(f"🚨 ALERTA DE MANTENCIÓN PREVENTIVA:\n\nSe ha programado una mantención para la línea {linea}.\nFecha: {fecha_prev}\nTrabajo a realizar: {tarea}{bloque_acciones}\n\nPor favor gestionar los recursos y herramientas.")
         msg['Subject'] = f"⚠️ Preventivo Programado - Línea {linea} ({fecha_prev})"
         msg['From'] = correo_emisor
         msg['To'] = correo_receptor
@@ -311,6 +341,10 @@ with st.expander(f"📝 Registrar Nueva Reunión / Turno para {linea_activa}", e
             t_verdes = st.number_input("Tarjetas Verdes", min_value=0, step=1)
             t_azules = st.number_input("Tarjetas Azules", min_value=0, step=1)
 
+            st.markdown("---")
+            st.markdown("### 📈 Eficiencia")
+            eficiencia_dia = st.number_input("Eficiencia del Día (%)", min_value=0, max_value=100, step=1, key="eficiencia_dia")
+
         with c3:
             st.markdown("### 💧 Módulo Lubricación y TPM MA")
             lub_planeados_ma = st.number_input("Puntos de Lubricación Planeados (MA)", min_value=0, step=1, key="lub_plan_ma")
@@ -341,7 +375,7 @@ with st.expander(f"📝 Registrar Nueva Reunión / Turno para {linea_activa}", e
 
 if boton_enviar:
     if enviar_mail and prev_tarea:
-        exito_mail = enviar_correo_preventivo(prev_fecha.strftime('%Y-%m-%d'), linea_activa, prev_tarea)
+        exito_mail = enviar_correo_preventivo(prev_fecha.strftime('%Y-%m-%d'), linea_activa, prev_tarea, acciones)
         if exito_mail:
             st.success("📩 Alerta de correo enviada correctamente.")
         else:
@@ -370,7 +404,11 @@ if boton_enviar:
         "TPM_Inspeccion_MP": tpm_inspeccion_mp,
         "Observaciones_MP": observaciones_mp,
         "Preventivo_Fecha": str(prev_fecha),
-        "Preventivo_Tarea": prev_tarea
+        "Preventivo_Tarea": prev_tarea,
+        # Si la tarea ya nace "Lista", se cierra el mismo día (0 días de demora).
+        # Si nace "Pendiente", queda sin fecha de cierre hasta que se marque Lista.
+        "Fecha_Cierre": str(fecha) if estado_inicial == "Listo" else "",
+        "Eficiencia_Diaria": eficiencia_dia
     }
 
     df_historico = pd.concat([df_historico, pd.DataFrame([nueva_fila])], ignore_index=True)
@@ -417,6 +455,12 @@ if not df_linea.empty:
             st.metric("💥 Número de Averías", int(registro_dia['Numero_Averias']))
             st.metric("📨 Avisos Generados", int(registro_dia['Avisos_Creados']))
             st.metric("⚙️ Órdenes de Mantención (OM)", int(registro_dia['OM_Creadas']))
+            st.metric("📈 Eficiencia del Día", f"{int(registro_dia['Eficiencia_Diaria'])}%")
+            if pd.notna(registro_dia['Fecha_Cierre']):
+                dias_demora = (registro_dia['Fecha_Cierre'] - registro_dia['Fecha']).days
+                st.metric("⏱️ Demora en Ejecutarla", f"{dias_demora} día(s)")
+            else:
+                st.metric("⏱️ Demora en Ejecutarla", "Aún pendiente")
         with det3:
             st.info(f"💡 **Ideas de Mejora:**\n{registro_dia['Formulario_Mejoras']}")
             st.metric("💧 Lubricación MA (Ejecutados / Planeados)", f"{int(registro_dia['Lub_Ejecutados_MA'])} / {int(registro_dia['Lub_Planeados_MA'])}")
@@ -457,6 +501,12 @@ if not df_linea.empty:
             st.write("")
             if st.button("⚡ Ejecutar y Cerrar Tarea"):
                 df_historico.loc[registro_a_cambiar, "Estado"] = nuevo_estado
+                if nuevo_estado == "Listo":
+                    # Se registra la fecha de hoy como cierre, para medir cuánto demoró.
+                    df_historico.loc[registro_a_cambiar, "Fecha_Cierre"] = pd.to_datetime(date.today())
+                else:
+                    # Si se reabre como Pendiente, se borra la fecha de cierre previa.
+                    df_historico.loc[registro_a_cambiar, "Fecha_Cierre"] = pd.NaT
                 guardar_datos(df_historico)
 
                 st.success("✅ ¡Tarea actualizada con éxito!")
@@ -517,6 +567,9 @@ if not df_linea.empty:
         st.markdown("**💥 Averías vs Avisos vs OM**")
         st.line_chart(df_grafico_indexado[["Numero_Averias", "Avisos_Creados", "OM_Creadas"]])
 
+        st.markdown("**📈 Eficiencia Diaria (%)**")
+        st.line_chart(df_grafico_indexado[["Eficiencia_Diaria"]])
+
     with g2:
         st.markdown("**💧 Cumplimiento de Lubricación MA (Ejecutados vs Planeados)**")
         st.bar_chart(df_grafico_indexado[["Lub_Planeados_MA", "Lub_Ejecutados_MA"]])
@@ -526,6 +579,14 @@ if not df_linea.empty:
 
         st.markdown("**⚙️ TPM: Anomalías Detectadas (MA vs MP)**")
         st.line_chart(df_grafico_indexado[["TPM_Inspeccion_MA", "TPM_Inspeccion_MP"]])
+
+        st.markdown("**⏱️ Demora en Ejecutar Tareas (días entre registro y cierre)**")
+        df_demora = df_grafico[df_grafico["Fecha_Cierre"].notna()].copy()
+        if not df_demora.empty:
+            df_demora["Dias_Demora"] = (df_demora["Fecha_Cierre"] - df_demora["Fecha"]).dt.days
+            df_demora_indexado = df_demora.set_index("Fecha_Str")
+            st.bar_chart(df_demora_indexado[["Dias_Demora"]])
+        else:
+            st.write("✅ Aún no hay tareas cerradas para calcular demora.")
 else:
     st.info("No hay suficientes datos para graficar en esta línea todavía.")
-
