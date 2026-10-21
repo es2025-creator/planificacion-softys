@@ -3,8 +3,15 @@ import pandas as pd
 import os
 import time
 import smtplib
+import json
+import base64
+import uuid
+import altair as alt
 from datetime import date, timedelta
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -63,6 +70,47 @@ div[data-testid="stNumberInput"]:has(input[aria-label="Tarjetas Azules"]) {
 </style>
 """, unsafe_allow_html=True)
 
+# ===============================
+# TEMA ELEGANTE (azul marino + dorado)
+# ===============================
+COLOR_ROJO, COLOR_VERDE, COLOR_AZUL = "#D32F2F", "#2E7D32", "#1565C0"
+COLOR_NAVY, COLOR_DORADO = "#0B2545", "#C9A227"
+
+st.markdown("""
+<style>
+.stApp { background: linear-gradient(180deg, #f7f8fc 0%, #e8edf6 100%); }
+h1 { color: #0B2545 !important; font-weight: 800 !important; letter-spacing: .3px;
+     border-bottom: 3px solid #C9A227; padding-bottom: .35rem; }
+h2, h3 { color: #0B2545 !important; }
+hr { border-color: rgba(201,162,39,.55) !important; }
+
+[data-testid="stSidebar"] { background: linear-gradient(180deg, #0B2545 0%, #13315C 100%); }
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] label p { color: #F1E7C1 !important; border: 0; }
+
+.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button {
+    background: linear-gradient(135deg, #0B2545, #13315C); border: 1px solid #C9A227;
+    border-radius: 10px; font-weight: 600; box-shadow: 0 2px 8px rgba(11,37,69,.18);
+}
+.stButton > button *, .stFormSubmitButton > button *, .stDownloadButton > button * { color: #fff !important; }
+.stButton > button:hover, .stFormSubmitButton > button:hover, .stDownloadButton > button:hover {
+    background: #C9A227; border-color: #C9A227;
+}
+.stButton > button:hover *, .stFormSubmitButton > button:hover *, .stDownloadButton > button:hover * {
+    color: #0B2545 !important;
+}
+
+[data-testid="stExpander"], [data-testid="stForm"] {
+    background: #ffffff; border: 1px solid #d9e0ee; border-radius: 14px;
+    box-shadow: 0 4px 14px rgba(11,37,69,.08);
+}
+[data-testid="stMetric"] {
+    background: #ffffff; border-left: 5px solid #C9A227; border-radius: 12px;
+    padding: .7rem 1rem; box-shadow: 0 2px 10px rgba(11,37,69,.08);
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🏭 Sistema Integrado de Planificación y TPM")
 st.markdown("Control de Avisos, OM, Especialidades, Lubricación y Gestión de Pendientes por Línea.")
 
@@ -108,18 +156,25 @@ COLUMNAS_REQUERIDAS = [
     "Avisos_Creados", "OM_Creadas", "Numero_Averias",
     "Lub_Planeados_MA", "Lub_Ejecutados_MA", "TPM_Inspeccion_MA", "Observaciones_MA",
     "Lub_Planeados_MP", "Lub_Ejecutados_MP", "TPM_Inspeccion_MP", "Observaciones_MP",
-    "Preventivo_Fecha", "Preventivo_Tarea", "Fecha_Cierre", "Eficiencia_Diaria"
+    "Preventivo_Fecha", "Preventivo_Tarea", "Fecha_Cierre", "Eficiencia_Diaria",
+    "Dias_Sin_Accidentes", "ACR_Solicitado", "ACR_Ejecutado",
+    "MTTR_min", "MTBF_h", "Disponibilidad_pct", "Preventivo_Adjunto"
 ]
+COLS_NUM_NUEVAS = ["Dias_Sin_Accidentes", "ACR_Solicitado", "ACR_Ejecutado",
+                   "MTTR_min", "MTBF_h", "Disponibilidad_pct"]
 
 @st.cache_resource
-def conectar_sheet():
+def conectar_libro():
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"], scopes=scopes
     )
     cliente = gspread.authorize(creds)
-    hoja = cliente.open_by_key(st.secrets["gsheet"]["sheet_id"]).sheet1
-    return hoja
+    return cliente.open_by_key(st.secrets["gsheet"]["sheet_id"])
+
+@st.cache_resource
+def conectar_sheet():
+    return conectar_libro().sheet1
 
 def cargar_datos():
     hoja = conectar_sheet()
@@ -146,18 +201,24 @@ def cargar_datos():
             "Preventivo_Fecha": str(date.today()), "Preventivo_Tarea": "",
             "Fecha_Cierre": str(date.today()), "Eficiencia_Diaria": 0
         }])
+        for _c in COLUMNAS_REQUERIDAS:
+            if _c not in df_inicial.columns:
+                df_inicial[_c] = 0 if _c in COLS_NUM_NUEVAS else ""
+        df_inicial = df_inicial[COLUMNAS_REQUERIDAS]
         guardar_datos(df_inicial)
         return df_inicial
 
     df = pd.DataFrame(registros)
     for col in COLUMNAS_REQUERIDAS:
         if col not in df.columns:
-            df[col] = 0 if any(x in col for x in ["Tarjetas", "Avisos", "OM", "Numero", "Lub", "TPM", "Eficiencia"]) else ""
+            df[col] = 0 if (col in COLS_NUM_NUEVAS or any(x in col for x in ["Tarjetas", "Avisos", "OM", "Numero", "Lub", "TPM", "Eficiencia"])) else ""
     df = df[COLUMNAS_REQUERIDAS]
     df["Fecha"] = pd.to_datetime(df["Fecha"])
     # Fecha_Cierre puede venir vacía (tarea aún pendiente); se deja como NaT en ese caso.
     df["Fecha_Cierre"] = pd.to_datetime(df["Fecha_Cierre"], errors="coerce")
     df["Eficiencia_Diaria"] = pd.to_numeric(df["Eficiencia_Diaria"], errors="coerce").fillna(0)
+    for _c in COLS_NUM_NUEVAS:
+        df[_c] = pd.to_numeric(df[_c], errors="coerce").fillna(0)
     # Google Sheets convierte líneas como "190" en números; se normalizan a texto
     # para que coincidan con las opciones del selector de línea.
     df["Linea"] = df["Linea"].astype(str).str.strip()
@@ -206,9 +267,13 @@ def guardar_datos(df):
     for intento in range(3):
         try:
             filas_previas = len(hoja.col_values(1))
+            if hoja.col_count < len(valores[0]):
+                hoja.resize(cols=len(valores[0]))
+            if hoja.row_count < len(valores):
+                hoja.resize(rows=len(valores) + 100)
             hoja.update(valores)
             if filas_previas > len(valores):
-                hoja.batch_clear([f"A{len(valores) + 1}:Z{filas_previas}"])
+                hoja.batch_clear([f"A{len(valores) + 1}:AZ{filas_previas}"])
             break
         except gspread.exceptions.APIError as e:
             if intento == 2:
@@ -222,7 +287,68 @@ def guardar_datos(df):
                 st.stop()
             time.sleep(5 * (intento + 1))
 
-def enviar_correo_preventivo(fecha_prev, linea, tarea, acciones_dia=""):
+# ===============================
+# ADJUNTOS (se guardan en la hoja "Adjuntos" del mismo Google Sheet)
+# ===============================
+HOJA_ADJUNTOS = "Adjuntos"
+CHUNK = 40_000          # caracteres por celda (límite de Sheets: 50.000)
+MAX_ADJUNTO_MB = 3      # tamaño máximo por archivo
+
+def _hoja_adjuntos():
+    libro = conectar_libro()
+    try:
+        return libro.worksheet(HOJA_ADJUNTOS)
+    except gspread.WorksheetNotFound:
+        ws = libro.add_worksheet(title=HOJA_ADJUNTOS, rows=1000, cols=3)
+        ws.append_row(["id", "n", "datos_base64"])
+        return ws
+
+def guardar_adjunto(nombre, datos, mime):
+    """Guarda el archivo en trozos y devuelve el texto (JSON) que se anota en el registro."""
+    adj_id = uuid.uuid4().hex[:10]
+    b64 = base64.b64encode(datos).decode()
+    trozos = [b64[i:i + CHUNK] for i in range(0, len(b64), CHUNK)]
+    ws = _hoja_adjuntos()
+    filas = [[adj_id, i, t] for i, t in enumerate(trozos)]
+    for k in range(0, len(filas), 30):
+        ws.append_rows(filas[k:k + 30], value_input_option="RAW")
+    return json.dumps({"id": adj_id, "nombre": nombre, "tipo": mime or "application/octet-stream",
+                       "n": len(trozos), "kb": round(len(datos) / 1024, 1)}, ensure_ascii=False)
+
+def leer_adjunto(meta):
+    ws = _hoja_adjuntos()
+    pos = [i + 1 for i, v in enumerate(ws.col_values(1)) if v == meta["id"]]
+    if not pos:
+        raise ValueError("el adjunto ya no existe en la hoja 'Adjuntos'")
+    filas = ws.get(f"A{min(pos)}:C{max(pos)}")
+    trozos = sorted((int(f[1]), f[2]) for f in filas if len(f) >= 3 and f[0] == meta["id"])
+    return base64.b64decode("".join(t for _, t in trozos))
+
+def _meta_adjunto(valor):
+    try:
+        m = json.loads(valor) if isinstance(valor, str) and valor.strip().startswith("{") else None
+        return m if m and "id" in m else None
+    except Exception:
+        return None
+
+def adjunto_ui(valor, clave):
+    """Muestra el adjunto de un registro con botón para cargarlo y descargarlo."""
+    m = _meta_adjunto(valor)
+    if not m:
+        return
+    st.caption(f"📎 {m['nombre']} ({m['kb']} KB)")
+    k = f"adjbytes_{m['id']}"
+    if k in st.session_state:
+        st.download_button("⬇ Descargar adjunto", st.session_state[k], file_name=m["nombre"],
+                           mime=m["tipo"], key=f"dl_{clave}")
+    elif st.button("📎 Cargar adjunto", key=f"ld_{clave}"):
+        try:
+            st.session_state[k] = leer_adjunto(m)
+            st.rerun()
+        except Exception as e:
+            st.error(f"No se pudo leer el adjunto: {e}")
+
+def enviar_correo_preventivo(fecha_prev, linea, tarea, acciones_dia="", adjunto=None):
     try:
         correo_emisor = st.secrets["email"]["usuario"]
         password_correo = st.secrets["email"]["password"]
@@ -251,7 +377,17 @@ def enviar_correo_preventivo(fecha_prev, linea, tarea, acciones_dia=""):
 
         bloque_acciones = f"\n\nAcciones del Día / Compromisos registrados:\n{acciones_dia}" if acciones_dia else ""
 
-        msg = MIMEText(f"🚨 ALERTA DE MANTENCIÓN PREVENTIVA:\n\nSe ha programado una mantención para la línea {linea}.\nFecha: {fecha_prev}\nTrabajo a realizar: {tarea}{bloque_acciones}\n\nPor favor gestionar los recursos y herramientas.")
+        cuerpo = f"🚨 ALERTA DE MANTENCIÓN PREVENTIVA:\n\nSe ha programado una mantención para la línea {linea}.\nFecha: {fecha_prev}\nTrabajo a realizar: {tarea}{bloque_acciones}\n\nPor favor gestionar los recursos y herramientas."
+        msg = MIMEMultipart()
+        msg.attach(MIMEText(cuerpo))
+        if adjunto:
+            nombre_adj, datos_adj, mime_adj = adjunto
+            t1, _, t2 = (mime_adj or "application/octet-stream").partition("/")
+            parte = MIMEBase(t1, t2 or "octet-stream")
+            parte.set_payload(datos_adj)
+            encoders.encode_base64(parte)
+            parte.add_header("Content-Disposition", "attachment", filename=("utf-8", "", nombre_adj))
+            msg.attach(parte)
         msg['Subject'] = f"⚠️ Preventivo Programado - Línea {linea} ({fecha_prev})"
         msg['From'] = correo_emisor
         msg['To'] = correo_receptor
@@ -276,6 +412,10 @@ LINEAS_DISPONIBLES = ["LAM 1", "LAM 2", "260", "230", "190", "LAM 3", "PALETIZAD
 linea_activa = st.sidebar.selectbox("Selecciona la Línea Productiva:", LINEAS_DISPONIBLES)
 
 st.subheader(f"🖥️ Pantalla Actual: Área de {linea_activa}")
+
+_df_ult = df_historico[df_historico["Linea"] == linea_activa].sort_values("Fecha", kind="stable")
+dias_sin_acc = int(_df_ult["Dias_Sin_Accidentes"].iloc[-1]) if not _df_ult.empty else 0
+st.metric("🛡️ Días sin accidentes", dias_sin_acc)
 
 # ===============================
 # SENSOR DE ALERTAS EXCLUSIVO DE LA LÍNEA SELECCIONADA
@@ -307,6 +447,7 @@ with col_alertas2:
         for idx, row in df_prev_linea.iterrows():
             p_f_str = row['Preventivo_Fecha'].strftime('%Y-%m-%d')
             st.success(f"🔧 **[{p_f_str}]:** {row['Preventivo_Tarea']}")
+            adjunto_ui(row.get("Preventivo_Adjunto", ""), f"sem_{idx}")
     else:
         st.write("✅ No hay trabajos preventivos agendados para esta semana.")
 
@@ -360,12 +501,28 @@ with st.expander(f"📝 Registrar Nueva Reunión / Turno para {linea_activa}", e
             observaciones_mp = st.text_area("Observaciones Detectadas (MP)", key="obs_mp")
 
         st.markdown("---")
+        st.markdown("### 🛡️ Seguridad, ACR y Confiabilidad")
+        s1, s2 = st.columns(2)
+        with s1:
+            dias_sin_acc_in = st.number_input("Días sin accidentes", min_value=0, step=1, value=dias_sin_acc)
+            acr_solicitado = st.number_input("ACR solicitado", min_value=0, step=1)
+            acr_ejecutado = st.number_input("ACR ejecutado", min_value=0, step=1)
+        with s2:
+            mttr_in = st.number_input("MTTR (min)", min_value=0.0, step=0.5, format="%.1f")
+            mtbf_in = st.number_input("MTBF (h)", min_value=0.0, step=0.5, format="%.1f")
+            disp_in = st.number_input(
+                "Disponibilidad (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.1f",
+                help="Referencia: Disponibilidad = MTBF / (MTBF + MTTR en horas) × 100")
+
+        st.markdown("---")
         st.markdown("### 📅 Alerta de Preventivo Técnico")
         col_prev1, col_prev2, col_prev3 = st.columns(3)
         with col_prev1:
             prev_fecha = st.date_input("Fecha Mantención Preventiva", date.today())
         with col_prev2:
             prev_tarea = st.text_input("Trabajo Preventivo a Realizar")
+            prev_adjunto = st.file_uploader(
+                f"📎 Adjuntar documento (cualquier tipo, máx. {MAX_ADJUNTO_MB} MB)", key="prev_adjunto")
         with col_prev3:
             st.write("")
             enviar_mail = st.checkbox("Enviar alerta por correo al guardar")
@@ -374,8 +531,20 @@ with st.expander(f"📝 Registrar Nueva Reunión / Turno para {linea_activa}", e
         boton_enviar = st.form_submit_button("💾 Guardar Datos del Turno")
 
 if boton_enviar:
+    adjunto_meta, adjunto_mail = "", None
+    if prev_adjunto is not None:
+        datos_adj = prev_adjunto.getvalue()
+        if len(datos_adj) > MAX_ADJUNTO_MB * 1024 * 1024:
+            st.warning(f"📎 '{prev_adjunto.name}' supera {MAX_ADJUNTO_MB} MB: el registro se guardará sin adjunto.")
+        else:
+            adjunto_mail = (prev_adjunto.name, datos_adj, prev_adjunto.type)
+            try:
+                adjunto_meta = guardar_adjunto(prev_adjunto.name, datos_adj, prev_adjunto.type)
+            except Exception as e:
+                st.warning(f"📎 No se pudo guardar el adjunto ({e}); el registro se guardará sin él.")
+
     if enviar_mail and prev_tarea:
-        exito_mail = enviar_correo_preventivo(prev_fecha.strftime('%Y-%m-%d'), linea_activa, prev_tarea, acciones)
+        exito_mail = enviar_correo_preventivo(prev_fecha.strftime('%Y-%m-%d'), linea_activa, prev_tarea, acciones, adjunto_mail)
         if exito_mail:
             st.success("📩 Alerta de correo enviada correctamente.")
         else:
@@ -408,7 +577,14 @@ if boton_enviar:
         # Si la tarea ya nace "Lista", se cierra el mismo día (0 días de demora).
         # Si nace "Pendiente", queda sin fecha de cierre hasta que se marque Lista.
         "Fecha_Cierre": str(fecha) if estado_inicial == "Listo" else "",
-        "Eficiencia_Diaria": eficiencia_dia
+        "Eficiencia_Diaria": eficiencia_dia,
+        "Dias_Sin_Accidentes": dias_sin_acc_in,
+        "ACR_Solicitado": acr_solicitado,
+        "ACR_Ejecutado": acr_ejecutado,
+        "MTTR_min": mttr_in,
+        "MTBF_h": mtbf_in,
+        "Disponibilidad_pct": disp_in,
+        "Preventivo_Adjunto": adjunto_meta
     }
 
     df_historico = pd.concat([df_historico, pd.DataFrame([nueva_fila])], ignore_index=True)
@@ -469,6 +645,10 @@ if not df_linea.empty:
             st.write(f"📝 **Observaciones MP:** {registro_dia['Observaciones_MP']}")
             st.write(f"📅 **Próximo Preventivo:** {registro_dia['Preventivo_Fecha']}")
             st.write(f"🔧 **Tarea:** {registro_dia['Preventivo_Tarea']}")
+            adjunto_ui(registro_dia["Preventivo_Adjunto"], f"det_{registro_consulta}")
+            st.write(f"🛡️ **Días sin accidentes:** {int(registro_dia['Dias_Sin_Accidentes'])}")
+            st.write(f"🔎 **ACR solicitado / ejecutado:** {int(registro_dia['ACR_Solicitado'])} / {int(registro_dia['ACR_Ejecutado'])}")
+            st.write(f"📉 **MTTR:** {registro_dia['MTTR_min']:.1f} min · **MTBF:** {registro_dia['MTBF_h']:.1f} h · **Disponibilidad:** {registro_dia['Disponibilidad_pct']:.1f} %")
 else:
     st.info("No hay registros disponibles en esta línea.")
 
@@ -562,7 +742,8 @@ if not df_linea.empty:
 
     with g1:
         st.markdown("**🔴 Tarjetas por fecha (Rojas / Verdes / Azules)**")
-        st.bar_chart(df_grafico_indexado[["Tarjetas_Rojas", "Tarjetas_Verdes", "Tarjetas_Azules"]])
+        st.bar_chart(df_grafico_indexado[["Tarjetas_Rojas", "Tarjetas_Verdes", "Tarjetas_Azules"]],
+                     color=[COLOR_ROJO, COLOR_VERDE, COLOR_AZUL])
 
         st.markdown("**💥 Averías vs Avisos vs OM**")
         st.line_chart(df_grafico_indexado[["Numero_Averias", "Avisos_Creados", "OM_Creadas"]])
@@ -588,5 +769,37 @@ if not df_linea.empty:
             st.bar_chart(df_demora_indexado[["Dias_Demora"]])
         else:
             st.write("✅ Aún no hay tareas cerradas para calcular demora.")
+
+    # ----- Seguridad, ACR y confiabilidad -----
+    st.markdown("---")
+    st.subheader("🛡️ Seguridad, ACR y Confiabilidad")
+    df_n = df_grafico.groupby("Fecha_Str").last()
+
+    def _serie(col, titulo, color, tope_100=False):
+        st.markdown(titulo)
+        d = df_n[df_n[col] > 0][[col]]
+        if d.empty:
+            st.caption("Aún no hay datos ingresados.")
+        elif tope_100:
+            graf = alt.Chart(d.reset_index()).mark_area(
+                color=color, opacity=0.3, line={"color": color}, point={"color": color}
+            ).encode(
+                x=alt.X("Fecha_Str:N", title="Fecha"),
+                y=alt.Y(f"{col}:Q", scale=alt.Scale(domain=[0, 100]), title="%"),
+            )
+            st.altair_chart(graf)
+        else:
+            st.line_chart(d, color=color)
+
+    n1, n2 = st.columns(2)
+    with n1:
+        st.markdown("**🛡️ Días sin accidentes**")
+        st.line_chart(df_n[["Dias_Sin_Accidentes"]], color=COLOR_VERDE)
+        st.markdown("**🔎 ACR solicitado vs ejecutado**")
+        st.bar_chart(df_n[["ACR_Solicitado", "ACR_Ejecutado"]], color=[COLOR_DORADO, COLOR_NAVY], stack=False)
+    with n2:
+        _serie("MTTR_min", "**🛠️ MTTR (min)**", "#E67E22")
+        _serie("MTBF_h", "**🔁 MTBF (h)**", COLOR_AZUL)
+        _serie("Disponibilidad_pct", "**✅ Disponibilidad (%)**", COLOR_VERDE, tope_100=True)
 else:
     st.info("No hay suficientes datos para graficar en esta línea todavía.")
