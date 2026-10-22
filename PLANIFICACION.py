@@ -956,3 +956,4 @@ if not df_linea.empty:
 else:
     st.info("No hay suficientes datos para graficar en esta línea todavía.")
 
+
