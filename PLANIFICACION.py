@@ -71,45 +71,101 @@ div[data-testid="stNumberInput"]:has(input[aria-label="Tarjetas Azules"]) {
 """, unsafe_allow_html=True)
 
 # ===============================
-# TEMA ELEGANTE (azul marino + dorado)
+# TEMA ELEGANTE (azul marino + dorado) — se adapta al modo claro / oscuro de Streamlit
 # ===============================
 COLOR_ROJO, COLOR_VERDE, COLOR_AZUL = "#D32F2F", "#2E7D32", "#1565C0"
-COLOR_NAVY, COLOR_DORADO = "#0B2545", "#C9A227"
+COLOR_DORADO, COLOR_ACR_EJEC = "#C9A227", "#2F6FDB"   # se ven bien en fondo claro y oscuro
 
-st.markdown("""
-<style>
-.stApp { background: linear-gradient(180deg, #f7f8fc 0%, #e8edf6 100%); }
-h1 { color: #0B2545 !important; font-weight: 800 !important; letter-spacing: .3px;
-     border-bottom: 3px solid #C9A227; padding-bottom: .35rem; }
-h2, h3 { color: #0B2545 !important; }
-hr { border-color: rgba(201,162,39,.55) !important; }
+try:
+    _tipo_tema = st.context.theme.type   # "light" | "dark" | None (si aún no se conoce)
+except Exception:
+    _tipo_tema = None
 
+
+# Selectores de casillas: sirven para versiones nuevas de Streamlit (sin "baseweb") y para las antiguas.
+_CAMPOS = (
+    '[data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="textarea"], [data-baseweb="select"] > div, '
+    '[data-testid="stNumberInputContainer"], [data-testid="stTextInputRootElement"], [data-testid="stTextAreaRootElement"], '
+    '[data-testid="stDateInputField"], [data-testid="stSelectbox"] [role="group"], [data-testid="stMultiSelect"] [role="group"]')
+_INTERNOS = 'input, textarea, [data-testid="stDateInputField"] [role="spinbutton"]'
+_PASOS = ('button[data-testid^="stNumberInputStep"], [data-testid="stSelectbox"] button, '
+          '[data-testid="stMultiSelect"] button')
+_LISTAS = ('[data-baseweb="popover"] ul, [data-baseweb="menu"], [role="listbox"], '
+           '[data-testid="stSelectboxVirtualDropdown"], .react-aria-Popover')
+_OPCIONES = '[data-baseweb="popover"] li, [data-baseweb="popover"] li *, [role="option"], [role="option"] *'
+_HOVER = '[data-baseweb="popover"] li:hover, [role="option"]:hover, [role="option"][data-focused="true"]'
+
+def _aplicar(css):
+    return (css.replace("{CAMPOS}", _CAMPOS).replace("{INTERNOS}", _INTERNOS).replace("{PASOS}", _PASOS)
+               .replace("{LISTAS}", _LISTAS).replace("{OPCIONES}", _OPCIONES).replace("{HOVER}", _HOVER))
+
+CSS_BASE = """
 [data-testid="stSidebar"] { background: linear-gradient(180deg, #0B2545 0%, #13315C 100%); }
 [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
 [data-testid="stSidebar"] label p { color: #F1E7C1 !important; border: 0; }
+[data-testid="stSidebar"] [data-baseweb="select"] div, [data-testid="stSidebar"] [data-testid="stSelectbox"] [role="group"],
+[data-testid="stSidebar"] [data-testid="stSelectbox"] button, [data-testid="stSidebar"] [data-testid="stSelectbox"] input,
+[data-testid="stSidebar"] [data-baseweb="select"] input {
+    background-color: #F4F7FC !important; color: #0B2545 !important; -webkit-text-fill-color: #0B2545 !important; }
+[data-testid="stSidebar"] [data-baseweb="select"] svg, [data-testid="stSidebar"] [data-testid="stSelectbox"] svg { fill: #0B2545 !important; }
 
-.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button {
+h1 { font-weight: 800 !important; letter-spacing: .3px; border-bottom: 3px solid #C9A227; padding-bottom: .35rem; }
+hr { border-color: rgba(201,162,39,.55) !important; }
+
+.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button,
+[data-testid="stFileUploaderDropzone"] button {
     background: linear-gradient(135deg, #0B2545, #13315C); border: 1px solid #C9A227;
     border-radius: 10px; font-weight: 600; box-shadow: 0 2px 8px rgba(11,37,69,.18);
 }
-.stButton > button *, .stFormSubmitButton > button *, .stDownloadButton > button * { color: #fff !important; }
-.stButton > button:hover, .stFormSubmitButton > button:hover, .stDownloadButton > button:hover {
-    background: #C9A227; border-color: #C9A227;
-}
-.stButton > button:hover *, .stFormSubmitButton > button:hover *, .stDownloadButton > button:hover * {
-    color: #0B2545 !important;
-}
+.stButton > button *, .stFormSubmitButton > button *, .stDownloadButton > button *,
+[data-testid="stFileUploaderDropzone"] button * { color: #ffffff !important; }
+.stButton > button:hover, .stFormSubmitButton > button:hover, .stDownloadButton > button:hover,
+[data-testid="stFileUploaderDropzone"] button:hover { background: #C9A227; border-color: #C9A227; }
+.stButton > button:hover *, .stFormSubmitButton > button:hover *, .stDownloadButton > button:hover *,
+[data-testid="stFileUploaderDropzone"] button:hover * { color: #0B2545 !important; }
+[data-testid="stExpander"], [data-testid="stForm"] { border-radius: 14px; }
+[data-testid="stMetric"] { border-left: 5px solid #C9A227; border-radius: 12px; padding: .7rem 1rem; }
+"""
 
-[data-testid="stExpander"], [data-testid="stForm"] {
-    background: #ffffff; border: 1px solid #d9e0ee; border-radius: 14px;
-    box-shadow: 0 4px 14px rgba(11,37,69,.08);
-}
-[data-testid="stMetric"] {
-    background: #ffffff; border-left: 5px solid #C9A227; border-radius: 12px;
-    padding: .7rem 1rem; box-shadow: 0 2px 10px rgba(11,37,69,.08);
-}
-</style>
-""", unsafe_allow_html=True)
+CSS_CLARO = """
+.stApp { background: linear-gradient(180deg, #f7f8fc 0%, #e8edf6 100%); }
+:where([data-testid="stMain"]) :where(p, span, label, li, div, summary, h1, h2, h3, h4, h5, h6) { color: #14213D !important; }
+h1, h2, h3 { color: #0B2545 !important; }
+{CAMPOS} { background-color: #ffffff !important; border: 1px solid #c5cfe3 !important; border-radius: 10px !important; }
+{INTERNOS} { background-color: transparent !important; color: #0B2545 !important; -webkit-text-fill-color: #0B2545 !important; }
+{PASOS} { background: #eef2fa !important; color: #0B2545 !important; }
+{PASOS} svg { fill: #0B2545 !important; }
+{LISTAS} { background: #ffffff !important; }
+{OPCIONES} { color: #0B2545 !important; }
+{HOVER} { background: #eef2fa !important; }
+[data-testid="stFileUploaderDropzone"] { background: #f4f7fc !important; border: 1px dashed #aab7d3 !important; }
+[data-testid="stExpander"], [data-testid="stForm"] { background: #ffffff; border: 1px solid #d9e0ee; box-shadow: 0 4px 14px rgba(11,37,69,.08); }
+[data-testid="stMetric"] { background: #ffffff; box-shadow: 0 2px 10px rgba(11,37,69,.08); }
+"""
+
+CSS_OSCURO = """
+.stApp { background: linear-gradient(180deg, #0B1B33 0%, #12294A 100%); }
+:where([data-testid="stMain"]) :where(p, span, label, li, div, summary, h4, h5, h6) { color: #E8EEF9 !important; }
+h1, h2, h3 { color: #F1E7C1 !important; }
+{CAMPOS} { background-color: #1F3A63 !important; border: 1px solid rgba(201,162,39,.55) !important; border-radius: 10px !important; }
+{INTERNOS} { background-color: transparent !important; color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; }
+{PASOS} { background: #2A4A7C !important; color: #ffffff !important; }
+{PASOS} svg { fill: #ffffff !important; }
+{LISTAS} { background: #1F3A63 !important; }
+{OPCIONES} { color: #ffffff !important; }
+{HOVER} { background: #2A4A7C !important; }
+[data-testid="stFileUploaderDropzone"] { background: #1F3A63 !important; border: 1px dashed rgba(201,162,39,.6) !important; }
+[data-testid="stExpander"], [data-testid="stForm"] { background: rgba(255,255,255,.05); border: 1px solid rgba(201,162,39,.35); }
+[data-testid="stMetric"] { background: #16305A; }
+"""
+
+if _tipo_tema == "dark":
+    _css = CSS_BASE + _aplicar(CSS_OSCURO)
+elif _tipo_tema == "light":
+    _css = CSS_BASE + _aplicar(CSS_CLARO)
+else:   # aún no se conoce el modo: se sigue el del sistema operativo
+    _css = CSS_BASE + _aplicar(CSS_CLARO) + "@media (prefers-color-scheme: dark) {" + _aplicar(CSS_OSCURO) + "}"
+st.markdown("<style>" + _css + "</style>", unsafe_allow_html=True)
 
 st.title("🏭 Sistema Integrado de Planificación y TPM")
 st.markdown("Control de Avisos, OM, Especialidades, Lubricación y Gestión de Pendientes por Línea.")
@@ -796,7 +852,7 @@ if not df_linea.empty:
         st.markdown("**🛡️ Días sin accidentes**")
         st.line_chart(df_n[["Dias_Sin_Accidentes"]], color=COLOR_VERDE)
         st.markdown("**🔎 ACR solicitado vs ejecutado**")
-        st.bar_chart(df_n[["ACR_Solicitado", "ACR_Ejecutado"]], color=[COLOR_DORADO, COLOR_NAVY], stack=False)
+        st.bar_chart(df_n[["ACR_Solicitado", "ACR_Ejecutado"]], color=[COLOR_DORADO, COLOR_ACR_EJEC], stack=False)
     with n2:
         _serie("MTTR_min", "**🛠️ MTTR (min)**", "#E67E22")
         _serie("MTBF_h", "**🔁 MTBF (h)**", COLOR_AZUL)
