@@ -568,7 +568,7 @@ with st.expander("⚙️ Configurar contador de días sin accidentes"):
             except Exception as e:
                 st.error(f"No se pudo reiniciar el contador: {e}")
 
-# ===============================
+## ===============================
 # SENSOR DE ALERTAS EXCLUSIVO DE LA LÍNEA SELECCIONADA
 # ===============================
 col_alertas1, col_alertas2 = st.columns(2)
@@ -578,8 +578,12 @@ with col_alertas1:
     if not df_pendientes_linea.empty:
         st.error(f"🚨 **RECORDATORIO PENDIENTES: {linea_activa}**")
         for idx, row in df_pendientes_linea.iterrows():
-            f_str = pd.to_datetime(row['Fecha']).strftime('%Y-%m-%d')
-            st.warning(f"⏳ **Turno {f_str}:** {row['Acciones_Dia']}")
+            # ESTA ES LA LÍNEA CLAVE: Verifica que la celda de la fecha no venga vacía o corrupta
+            if pd.notna(row['Fecha']):
+                f_str = pd.to_datetime(row['Fecha']).strftime('%Y-%m-%d')
+                st.warning(f"⏳ **Turno {f_str}:** {row['Acciones_Dia']}")
+            else:
+                st.warning(f"⏳ **Turno sin fecha registrada:** {row['Acciones_Dia']}")
 
 with col_alertas2:
     df_historico["Preventivo_Fecha"] = pd.to_datetime(df_historico["Preventivo_Fecha"], errors="coerce")
@@ -596,8 +600,12 @@ with col_alertas2:
     st.info(f"📅 **MANTENCIONES PREVENTIVAS DE LA SEMANA: {linea_activa}**")
     if not df_prev_linea.empty:
         for idx, row in df_prev_linea.iterrows():
-            p_f_str = row['Preventivo_Fecha'].strftime('%Y-%m-%d')
-            st.success(f"🔧 **[{p_f_str}]:** {row['Preventivo_Tarea']}")
+            # PROTECCIÓN EXTRA: También aseguramos las fechas de las tareas preventivas de la semana
+            if pd.notna(row['Preventivo_Fecha']):
+                p_f_str = row['Preventivo_Fecha'].strftime('%Y-%m-%d')
+                st.success(f"🔧 **[{p_f_str}]:** {row['Preventivo_Tarea']}")
+            else:
+                st.success(f"🔧 **[Fecha indefinida]:** {row['Preventivo_Tarea']}")
             adjunto_ui(row.get("Preventivo_Adjunto", ""), f"sem_{idx}")
     else:
         st.write("✅ No hay trabajos preventivos agendados para esta semana.")
@@ -955,5 +963,6 @@ if not df_linea.empty:
         _serie("Disponibilidad_pct", "**✅ Disponibilidad (%)**", COLOR_VERDE, tope_100=True)
 else:
     st.info("No hay suficientes datos para graficar en esta línea todavía.")
+
 
 
