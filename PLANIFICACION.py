@@ -7,6 +7,11 @@ import json
 import base64
 import uuid
 import altair as alt
+from datetime import datetime as _datetime
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 from datetime import date, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -70,6 +75,21 @@ div[data-testid="stNumberInput"]:has(input[aria-label="Tarjetas Azules"]) {
 </style>
 """, unsafe_allow_html=True)
 
+# Evita que Chrome/Edge traduzcan la página sola (rompe React: "removeChild")
+_JS_NOTRANSLATE = """<script>
+const d = window.parent.document;
+d.documentElement.setAttribute("translate", "no");
+d.documentElement.setAttribute("lang", "es");
+if (!d.querySelector('meta[name="google"]')) {
+    const m = d.createElement("meta"); m.name = "google"; m.content = "notranslate"; d.head.appendChild(m);
+}
+</script>"""
+if hasattr(st, "iframe"):            # Streamlit reciente
+    st.iframe(_JS_NOTRANSLATE, height=1)
+else:                                # Streamlit más antiguo
+    import streamlit.components.v1 as _components
+    _components.html(_JS_NOTRANSLATE, height=0)
+
 # ===============================
 # TEMA ELEGANTE (azul marino + dorado) — se adapta al modo claro / oscuro de Streamlit
 # ===============================
@@ -123,6 +143,7 @@ hr { border-color: rgba(201,162,39,.55) !important; }
 [data-testid="stFileUploaderDropzone"] button:hover { background: #C9A227; border-color: #C9A227; }
 .stButton > button:hover *, .stFormSubmitButton > button:hover *, .stDownloadButton > button:hover *,
 [data-testid="stFileUploaderDropzone"] button:hover * { color: #0B2545 !important; }
+.stButton > button:disabled, .stFormSubmitButton > button:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
 [data-testid="stExpander"], [data-testid="stForm"] { border-radius: 14px; }
 [data-testid="stMetric"] { border-left: 5px solid #C9A227; border-radius: 12px; padding: .7rem 1rem; }
 """
@@ -380,6 +401,51 @@ def leer_adjunto(meta):
     trozos = sorted((int(f[1]), f[2]) for f in filas if len(f) >= 3 and f[0] == meta["id"])
     return base64.b64decode("".join(t for _, t in trozos))
 
+# ===============================
+# CONFIGURACIÓN (hoja "Config"): contador de días sin accidentes por línea
+# ===============================
+HOJA_CONFIG = "Config"
+
+def _hoja_config():
+    libro = conectar_libro()
+    try:
+        return libro.worksheet(HOJA_CONFIG)
+    except gspread.WorksheetNotFound:
+        ws = libro.add_worksheet(title=HOJA_CONFIG, rows=100, cols=2)
+        ws.append_row(["clave", "valor"])
+        return ws
+
+@st.cache_data(ttl=120, show_spinner=False)
+def leer_config():
+    try:
+        filas = _hoja_config().get_all_values()
+    except Exception:
+        return {}
+    return {f[0]: f[1] for f in filas[1:] if len(f) >= 2 and f[0]}
+
+def guardar_config(clave, valor):
+    ws = _hoja_config()
+    claves = ws.col_values(1)
+    if clave in claves:
+        ws.update_cell(claves.index(clave) + 1, 2, valor)
+    else:
+        ws.append_row([clave, valor], value_input_option="RAW")
+    leer_config.clear()
+
+def hoy_chile():
+    try:
+        return _datetime.now(ZoneInfo("America/Santiago")).date()
+    except Exception:
+        return date.today()
+
+def fecha_inicio_sin_accidentes(linea):
+    """Fecha desde la que se cuentan los días (se guarda como 'd:AAAA-MM-DD' para que Sheets no la convierta)."""
+    v = leer_config().get(f"sin_accidentes|{linea}", "")
+    try:
+        return date.fromisoformat(v.replace("d:", "").strip())
+    except Exception:
+        return None
+
 def _meta_adjunto(valor):
     try:
         m = json.loads(valor) if isinstance(valor, str) and valor.strip().startswith("{") else None
@@ -469,9 +535,38 @@ linea_activa = st.sidebar.selectbox("Selecciona la Línea Productiva:", LINEAS_D
 
 st.subheader(f"🖥️ Pantalla Actual: Área de {linea_activa}")
 
-_df_ult = df_historico[df_historico["Linea"] == linea_activa].sort_values("Fecha", kind="stable")
-dias_sin_acc = int(_df_ult["Dias_Sin_Accidentes"].iloc[-1]) if not _df_ult.empty else 0
+HOY = hoy_chile()
+_clave_acc = f"sin_accidentes|{linea_activa}"
+_inicio_acc = fecha_inicio_sin_accidentes(linea_activa)
+if _inicio_acc:
+    dias_sin_acc = max(0, (HOY - _inicio_acc).days)
+else:   # contador aún sin configurar: se usa el último valor registrado
+    _df_ult = df_historico[df_historico["Linea"] == linea_activa].sort_values("Fecha", kind="stable")
+    dias_sin_acc = int(_df_ult["Dias_Sin_Accidentes"].iloc[-1]) if not _df_ult.empty else 0
 st.metric("🛡️ Días sin accidentes", dias_sin_acc)
+if _inicio_acc:
+    st.caption(f"Contando desde el {_inicio_acc:%d-%m-%Y}. Se actualiza solo cada día.")
+else:
+    st.caption("Contador sin configurar: ábrelo aquí abajo y escribe cuántos días llevan.")
+
+with st.expander("⚙️ Configurar contador de días sin accidentes"):
+    cfg1, cfg2 = st.columns(2)
+    with cfg1:
+        n_dias_acc = st.number_input("Días que llevan HOY sin accidentes", min_value=0, step=1, key="cfg_dias_acc")
+        if st.button("✅ Fijar contador", key="btn_fijar_acc"):
+            try:
+                guardar_config(_clave_acc, "d:" + (HOY - timedelta(days=int(n_dias_acc))).isoformat())
+                st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo guardar el contador: {e}")
+    with cfg2:
+        conf_acc = st.checkbox("Confirmo que ocurrió un accidente", key="chk_acc")
+        if st.button("🚨 Reiniciar a 0", key="btn_reset_acc", disabled=not conf_acc):
+            try:
+                guardar_config(_clave_acc, "d:" + HOY.isoformat())
+                st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo reiniciar el contador: {e}")
 
 # ===============================
 # SENSOR DE ALERTAS EXCLUSIVO DE LA LÍNEA SELECCIONADA
@@ -560,7 +655,8 @@ with st.expander(f"📝 Registrar Nueva Reunión / Turno para {linea_activa}", e
         st.markdown("### 🛡️ Seguridad, ACR y Confiabilidad")
         s1, s2 = st.columns(2)
         with s1:
-            dias_sin_acc_in = st.number_input("Días sin accidentes", min_value=0, step=1, value=dias_sin_acc)
+            dias_sin_acc_in = dias_sin_acc   # automático: viene del contador
+            st.metric("Días sin accidentes (automático)", dias_sin_acc)
             acr_solicitado = st.number_input("ACR solicitado", min_value=0, step=1)
             acr_ejecutado = st.number_input("ACR ejecutado", min_value=0, step=1)
         with s2:
@@ -859,3 +955,4 @@ if not df_linea.empty:
         _serie("Disponibilidad_pct", "**✅ Disponibilidad (%)**", COLOR_VERDE, tope_100=True)
 else:
     st.info("No hay suficientes datos para graficar en esta línea todavía.")
+
