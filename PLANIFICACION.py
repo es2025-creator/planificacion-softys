@@ -293,6 +293,13 @@ def cargar_datos():
     df["Fecha"] = pd.to_datetime(df["Fecha"])
     # Fecha_Cierre puede venir vacía (tarea aún pendiente); se deja como NaT en ese caso.
     df["Fecha_Cierre"] = pd.to_datetime(df["Fecha_Cierre"], errors="coerce")
+    # Registros sin fecha (celda vacía o ilegible): se les asigna una fecha provisoria para que la app
+    # no se caiga, y se avisa arriba. Al guardar de nuevo, la fecha queda escrita en la hoja.
+    _sin_fecha = df["Fecha"].isna()
+    if _sin_fecha.any():
+        _prov = df.loc[_sin_fecha, "Fecha_Cierre"].fillna(pd.Timestamp(date.today()))
+        df.loc[_sin_fecha, "Fecha"] = _prov.values
+    df.attrs["sin_fecha"] = int(_sin_fecha.sum())
     df["Eficiencia_Diaria"] = pd.to_numeric(df["Eficiencia_Diaria"], errors="coerce").fillna(0)
     for _c in COLS_NUM_NUEVAS:
         df[_c] = pd.to_numeric(df[_c], errors="coerce").fillna(0)
@@ -525,6 +532,9 @@ def enviar_correo_preventivo(fecha_prev, linea, tarea, acciones_dia="", adjunto=
         return False
 
 df_historico = cargar_datos()
+if df_historico.attrs.get("sin_fecha"):
+    st.warning(f"⚠️ Se encontraron {df_historico.attrs['sin_fecha']} registro(s) sin fecha en el Google Sheet. "
+               "Se les puso una fecha provisoria (cierre o de hoy). Revisa la columna «Fecha» de la hoja y corrígelos.")
 
 # ===============================
 # SELECTOR DE LÍNEA PRODUCTIVA (BARRA LATERAL)
@@ -863,7 +873,8 @@ if not df_linea.empty:
                             _nueva[_c] = 0
                         else:
                             _nueva[_c] = ""
-                    _nueva.update({"Fecha": _orig["Fecha"], "Linea": _orig["Linea"], "Estado": "Pendiente",
+                    _nueva.update({"Fecha": _orig["Fecha"] if pd.notna(_orig["Fecha"]) else pd.Timestamp(date.today()),
+                                   "Linea": _orig["Linea"], "Estado": "Pendiente",
                                    "Acciones_Dia": "\n".join(t for t in _lineas if t not in hechas)})
                     df_historico.loc[registro_a_cambiar, "Acciones_Dia"] = "\n".join(t for t in _lineas if t in hechas)
                     df_historico.loc[registro_a_cambiar, "Estado"] = "Listo"
