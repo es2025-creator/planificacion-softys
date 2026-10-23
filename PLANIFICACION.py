@@ -568,7 +568,7 @@ with st.expander("⚙️ Configurar contador de días sin accidentes"):
             except Exception as e:
                 st.error(f"No se pudo reiniciar el contador: {e}")
 
-## ===============================
+# ===============================
 # SENSOR DE ALERTAS EXCLUSIVO DE LA LÍNEA SELECCIONADA
 # ===============================
 col_alertas1, col_alertas2 = st.columns(2)
@@ -578,12 +578,8 @@ with col_alertas1:
     if not df_pendientes_linea.empty:
         st.error(f"🚨 **RECORDATORIO PENDIENTES: {linea_activa}**")
         for idx, row in df_pendientes_linea.iterrows():
-            # ESTA ES LA LÍNEA CLAVE: Verifica que la celda de la fecha no venga vacía o corrupta
-            if pd.notna(row['Fecha']):
-                f_str = pd.to_datetime(row['Fecha']).strftime('%Y-%m-%d')
-                st.warning(f"⏳ **Turno {f_str}:** {row['Acciones_Dia']}")
-            else:
-                st.warning(f"⏳ **Turno sin fecha registrada:** {row['Acciones_Dia']}")
+            f_str = pd.to_datetime(row['Fecha']).strftime('%Y-%m-%d')
+            st.warning(f"⏳ **Turno {f_str}:** {row['Acciones_Dia']}")
 
 with col_alertas2:
     df_historico["Preventivo_Fecha"] = pd.to_datetime(df_historico["Preventivo_Fecha"], errors="coerce")
@@ -600,12 +596,8 @@ with col_alertas2:
     st.info(f"📅 **MANTENCIONES PREVENTIVAS DE LA SEMANA: {linea_activa}**")
     if not df_prev_linea.empty:
         for idx, row in df_prev_linea.iterrows():
-            # PROTECCIÓN EXTRA: También aseguramos las fechas de las tareas preventivas de la semana
-            if pd.notna(row['Preventivo_Fecha']):
-                p_f_str = row['Preventivo_Fecha'].strftime('%Y-%m-%d')
-                st.success(f"🔧 **[{p_f_str}]:** {row['Preventivo_Tarea']}")
-            else:
-                st.success(f"🔧 **[Fecha indefinida]:** {row['Preventivo_Tarea']}")
+            p_f_str = row['Preventivo_Fecha'].strftime('%Y-%m-%d')
+            st.success(f"🔧 **[{p_f_str}]:** {row['Preventivo_Tarea']}")
             adjunto_ui(row.get("Preventivo_Adjunto", ""), f"sem_{idx}")
     else:
         st.write("✅ No hay trabajos preventivos agendados para esta semana.")
@@ -620,7 +612,8 @@ with st.expander(f"📝 Registrar Nueva Reunión / Turno para {linea_activa}", e
         with c1:
             st.markdown("### 📋 Bitácora General")
             fecha = st.date_input("Fecha de la Reunión", date.today())
-            acciones = st.text_area("Acciones del Día / Compromisos")
+            acciones = st.text_area("Acciones del Día / Compromisos",
+                                    help="Escribe cada tarea en una línea distinta (Enter). Así podrás cerrar solo las que se cumplieron.")
             mejoras = st.text_area("Formulario de Mejoras / Ideas")
             estado_inicial = st.selectbox("Estado de las Acciones", ["Pendiente", "Listo"])
 
@@ -851,6 +844,36 @@ if not df_linea.empty:
 
                 st.success("✅ ¡Tarea actualizada con éxito!")
                 st.rerun()
+
+        with st.expander("✂️ Se cumplieron solo algunas tareas de esta actividad"):
+            _lineas = [t.strip() for t in str(df_historico.loc[registro_a_cambiar, "Acciones_Dia"]).splitlines() if t.strip()]
+            if len(_lineas) < 2:
+                st.caption("Esta actividad tiene una sola línea. Para poder dividirla, escribe cada tarea en una línea distinta en «Acciones del Día».")
+            else:
+                hechas = st.multiselect("Tareas que YA se cumplieron:", _lineas, key="tareas_hechas_parcial")
+                st.caption("Las marcadas quedan como Listo; las que no marques siguen Pendientes (con su fecha original).")
+                if st.button("✂️ Guardar avance parcial", key="btn_parcial",
+                             disabled=(not hechas) or len(hechas) == len(_lineas)):
+                    _orig = df_historico.loc[registro_a_cambiar]
+                    _nueva = {}
+                    for _c in df_historico.columns:
+                        if pd.api.types.is_datetime64_any_dtype(df_historico[_c]):
+                            _nueva[_c] = pd.NaT
+                        elif pd.api.types.is_numeric_dtype(df_historico[_c]):
+                            _nueva[_c] = 0
+                        else:
+                            _nueva[_c] = ""
+                    _nueva.update({"Fecha": _orig["Fecha"], "Linea": _orig["Linea"], "Estado": "Pendiente",
+                                   "Acciones_Dia": "\n".join(t for t in _lineas if t not in hechas)})
+                    df_historico.loc[registro_a_cambiar, "Acciones_Dia"] = "\n".join(t for t in _lineas if t in hechas)
+                    df_historico.loc[registro_a_cambiar, "Estado"] = "Listo"
+                    df_historico.loc[registro_a_cambiar, "Fecha_Cierre"] = pd.to_datetime(date.today())
+                    df_historico = pd.concat([df_historico, pd.DataFrame([_nueva])], ignore_index=True)
+                    guardar_datos(df_historico)
+                    st.success("✅ Avance guardado: lo cumplido quedó Listo y el resto sigue Pendiente.")
+                    st.rerun()
+                if hechas and len(hechas) == len(_lineas):
+                    st.caption("Marcaste todas: usa «⚡ Ejecutar y Cerrar Tarea» arriba.")
     else:
         st.success(f"🎉 ¡Felicidades! No quedan actividades pendientes por ejecutar en la línea {linea_activa}.")
 else:
@@ -933,7 +956,7 @@ if not df_linea.empty:
     # ----- Seguridad, ACR y confiabilidad -----
     st.markdown("---")
     st.subheader("🛡️ Seguridad, ACR y Confiabilidad")
-    df_n = df_grafico.groupby("Fecha_Str").last()
+    df_n = df_grafico.groupby("Fecha_Str").max(numeric_only=True)
 
     def _serie(col, titulo, color, tope_100=False):
         st.markdown(titulo)
@@ -963,6 +986,3 @@ if not df_linea.empty:
         _serie("Disponibilidad_pct", "**✅ Disponibilidad (%)**", COLOR_VERDE, tope_100=True)
 else:
     st.info("No hay suficientes datos para graficar en esta línea todavía.")
-
-
-
