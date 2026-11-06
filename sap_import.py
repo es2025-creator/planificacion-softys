@@ -31,6 +31,10 @@ MAPA_LINEAS = {
     "PALE": "PALETIZADO",   # ajustar al código real de paletizado
 }
 
+# Solo se consideran las órdenes cuya ubicación técnica empieza así
+# (1101 = Puente Alto, LCON = Conversión). Para incluir más áreas, agrégalas a la tupla.
+UBICACIONES_INCLUIDAS = ("1101-LCON",)
+
 # Nombres de columna de SAP -> nombres internos
 COLUMNAS = {
     "Aviso": "aviso",
@@ -89,6 +93,10 @@ def leer_export_sap(archivo) -> pd.DataFrame:
         df[c] = df[c].str.strip()
 
     df = df[df["orden"] != ""]
+    total = len(df)
+    if UBICACIONES_INCLUIDAS:
+        df = df[df["ubicacion"].str.startswith(UBICACIONES_INCLUIDAS)]
+    excluidas = total - len(df)
 
     for c in ("inicio", "fin"):
         if c in df.columns:
@@ -99,7 +107,9 @@ def leer_export_sap(archivo) -> pd.DataFrame:
     df["cerrada"] = df["status"].str.contains(r"\bCTEC\b|\bCERR\b", regex=True)
     hoy = date.today()
     df["atrasada"] = (~df["cerrada"]) & df["fin"].notna() & (df["fin"] < hoy)
-    return df.reset_index(drop=True)
+    df = df.reset_index(drop=True)
+    df.attrs["excluidas"] = excluidas
+    return df
 
 
 def _bytes(archivo) -> bytes:
@@ -138,7 +148,14 @@ def _columna_interna(nombre: str, mapa: dict = None) -> str:
 def linea_desde_ubicacion(ubic: str) -> str:
     partes = (ubic or "").split("-")
     if len(partes) >= 3:
-        return MAPA_LINEAS.get(partes[2], f"Otra ({partes[1]}-{partes[2]})")
+        cod = partes[2]
+        if cod in MAPA_LINEAS:
+            return MAPA_LINEAS[cod]
+        if cod.startswith("LAM") and cod[3:].isdigit():      # LAM4 -> LAM 4
+            return f"LAM {cod[3:]}"
+        if cod.startswith("L") and cod[1:].isdigit():        # L180 -> 180
+            return cod[1:]
+        return f"Otra ({partes[1]}-{cod})"
     if len(partes) == 2:
         return f"Otra ({partes[1]})"
     return "Sin ubicación"
@@ -198,7 +215,10 @@ def mostrar_modulo_om(al_subir=None, info=None):
             st.session_state["sap_nombre"] = archivo.name
             if al_subir:
                 al_subir("om", archivo)
-            st.success(f"✅ {len(st.session_state['sap_df'])} órdenes cargadas.")
+            _d = st.session_state["sap_df"]
+            st.success(f"✅ {len(_d)} órdenes de Conversión cargadas"
+                       + (f" ({_d.attrs.get('excluidas', 0)} de otras áreas se omitieron)."
+                          if _d.attrs.get("excluidas") else "."))
         except StopIteration:
             st.error("No encontré la fila de títulos. ¿Exportaste con la disposición PIZARRA "
                      "y formato 'Texto con tabuladores'?")
