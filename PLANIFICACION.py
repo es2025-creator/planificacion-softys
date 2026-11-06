@@ -150,6 +150,11 @@ hr { border-color: rgba(201,162,39,.55) !important; }
 .stButton > button:disabled, .stFormSubmitButton > button:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
 [data-testid="stExpander"], [data-testid="stForm"] { border-radius: 14px; }
 [data-testid="stMetric"] { border-left: 5px solid #C9A227; border-radius: 12px; padding: .7rem 1rem; }
+/* Etiquetas de los filtros de selección múltiple (sin el cuadrito blanco) */
+[data-baseweb="tag"] { background-color: #13315C !important; border: 1px solid #C9A227 !important; }
+[data-baseweb="tag"] *, [data-testid="stMultiSelect"] [data-baseweb="tag"] span {
+    background: transparent !important; color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; }
+[data-baseweb="tag"] svg { fill: #ffffff !important; }
 """
 
 CSS_CLARO = """
