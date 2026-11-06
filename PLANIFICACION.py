@@ -18,7 +18,11 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import gspread
+import re
+import io
 from google.oauth2.service_account import Credentials
+from sap_import import (leer_export_sap, leer_export_me5a, mostrar_modulo_sap,
+                        buscar_orden, estado_de_sp)
 
 # ===============================
 # CONFIGURACIÓN DE LA PÁGINA
@@ -235,8 +239,10 @@ COLUMNAS_REQUERIDAS = [
     "Lub_Planeados_MP", "Lub_Ejecutados_MP", "TPM_Inspeccion_MP", "Observaciones_MP",
     "Preventivo_Fecha", "Preventivo_Tarea", "Fecha_Cierre", "Eficiencia_Diaria",
     "Dias_Sin_Accidentes", "ACR_Solicitado", "ACR_Ejecutado",
-    "MTTR_min", "MTBF_h", "Disponibilidad_pct", "Preventivo_Adjunto"
+    "MTTR_min", "MTBF_h", "Disponibilidad_pct", "Preventivo_Adjunto",
+    "SAP_Ordenes", "SAP_SolPed"
 ]
+COLS_SAP = ["SAP_Ordenes", "SAP_SolPed"]   # números de OM/OT y SP anotados (texto)
 COLS_NUM_NUEVAS = ["Dias_Sin_Accidentes", "ACR_Solicitado", "ACR_Ejecutado",
                    "MTTR_min", "MTBF_h", "Disponibilidad_pct"]
 
@@ -306,6 +312,10 @@ def cargar_datos():
     # Google Sheets convierte líneas como "190" en números; se normalizan a texto
     # para que coincidan con las opciones del selector de línea.
     df["Linea"] = df["Linea"].astype(str).str.strip()
+    # Sheets convierte "40775555" en número; se vuelve a texto sin ".0".
+    for _c in COLS_SAP:
+        df[_c] = (df[_c].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+                  .replace({"nan": "", "None": "", "0": ""}))
     df["Estado"] = df["Estado"].astype(str).str.strip()
     return df
 
@@ -453,6 +463,65 @@ def fecha_inicio_sin_accidentes(linea):
     except Exception:
         return None
 
+# ===============================
+# DATOS SAP (exports de IW38 y ME5A guardados en el Google Sheet)
+# ===============================
+# El .txt exportado de SAP se guarda tal cual en la hoja "Adjuntos" (igual que los
+# adjuntos de preventivos) y en "Config" queda la referencia al último archivo.
+# Así todos los planificadores ven la misma información sin tener que subirla.
+NOMBRE_SAP = {"om": "Órdenes IW38", "sp": "Solicitudes ME5A"}
+
+def guardar_export_sap(tipo, archivo):
+    try:
+        meta = json.loads(guardar_adjunto(archivo.name, archivo.getvalue(), "text/plain"))
+        meta["fecha"] = _datetime.now(ZoneInfo("America/Santiago")).strftime("%d-%m-%Y %H:%M") \
+            if ZoneInfo else str(date.today())
+        guardar_config(f"sap_{tipo}", json.dumps(meta, ensure_ascii=False))
+        st.toast(f"💾 {NOMBRE_SAP[tipo]} guardado para todos los planificadores.")
+    except Exception as e:
+        st.warning(f"Se cargó el archivo, pero no se pudo guardar en el Google Sheet: {e}")
+
+@st.cache_data(ttl=600, show_spinner="Leyendo datos de SAP…")
+def _leer_export_guardado(tipo, meta_json):
+    datos = leer_adjunto(json.loads(meta_json))
+    return leer_export_sap(datos) if tipo == "om" else leer_export_me5a(datos)
+
+def cargar_datos_sap():
+    """Deja en memoria el último export guardado de cada tipo y devuelve el texto de 'última carga'."""
+    info = {}
+    for tipo, clave_df in (("om", "sap_df"), ("sp", "sp_df")):
+        meta_json = leer_config().get(f"sap_{tipo}", "")
+        if not meta_json:
+            continue
+        try:
+            st.session_state[clave_df] = _leer_export_guardado(tipo, meta_json)
+            m = json.loads(meta_json)
+            info[tipo] = f"{m.get('nombre', '')} · {m.get('fecha', '')}"
+        except Exception as e:
+            info[tipo] = f"no se pudo leer ({e})"
+    return info
+
+def numeros_sap(texto):
+    """'40775555, 40775556' -> ['40775555', '40775556']"""
+    return [n for n in re.split(r"[^0-9]+", str(texto or "")) if len(n) >= 6]
+
+def lineas_estado_sap(fila):
+    """Textos cortos con el estado SAP de las OM y SP anotadas en un registro."""
+    salida = []
+    df_om = st.session_state.get("sap_df")
+    for om in numeros_sap(fila.get("SAP_Ordenes", "")):
+        r = buscar_orden(df_om, om) if df_om is not None else None
+        if r is None:
+            salida.append(f"⚙️ OM {om}: no está en el último listado de SAP (¿cerrada o de otro período?)")
+        else:
+            atr = " · ⚠️ atrasada" if r["atrasada"] else ""
+            salida.append(f"⚙️ OM {om}: {r['estado']} · fin {r['fin']:%d-%m}{atr} · {r['texto']}"
+                          if pd.notna(r["fin"]) else f"⚙️ OM {om}: {r['estado']} · {r['texto']}")
+    for sp in numeros_sap(fila.get("SAP_SolPed", "")):
+        est = estado_de_sp(sp)
+        salida.append(f"🧾 SP {sp}: {est}" if est else f"🧾 SP {sp}: no está entre las SP abiertas (¿ya concluida?)")
+    return salida
+
 def _meta_adjunto(valor):
     try:
         m = json.loads(valor) if isinstance(valor, str) and valor.strip().startswith("{") else None
@@ -532,6 +601,7 @@ def enviar_correo_preventivo(fecha_prev, linea, tarea, acciones_dia="", adjunto=
         return False
 
 df_historico = cargar_datos()
+info_sap = cargar_datos_sap()
 if df_historico.attrs.get("sin_fecha"):
     st.warning(f"⚠️ Se encontraron {df_historico.attrs['sin_fecha']} registro(s) sin fecha en el Google Sheet. "
                "Se les puso una fecha provisoria (cierre o de hoy). Revisa la columna «Fecha» de la hoja y corrígelos.")
@@ -590,6 +660,8 @@ with col_alertas1:
         for idx, row in df_pendientes_linea.iterrows():
             f_str = pd.to_datetime(row['Fecha']).strftime('%Y-%m-%d')
             st.warning(f"⏳ **Turno {f_str}:** {row['Acciones_Dia']}")
+            for _t in lineas_estado_sap(row):
+                st.caption(_t)
 
 with col_alertas2:
     df_historico["Preventivo_Fecha"] = pd.to_datetime(df_historico["Preventivo_Fecha"], errors="coerce")
@@ -611,6 +683,27 @@ with col_alertas2:
             adjunto_ui(row.get("Preventivo_Adjunto", ""), f"sem_{idx}")
     else:
         st.write("✅ No hay trabajos preventivos agendados para esta semana.")
+
+# ===============================
+# ÓRDENES SAP DE LA LÍNEA (según el último export de IW38)
+# ===============================
+_df_sap = st.session_state.get("sap_df")
+if _df_sap is not None:
+    _om_linea = _df_sap[_df_sap["linea"] == linea_activa]
+    _atr = int(_om_linea["atrasada"].sum())
+    with st.expander(f"🔗 Órdenes SAP abiertas de {linea_activa}: {len(_om_linea)}"
+                     + (f" · ⚠️ {_atr} atrasadas" if _atr else ""), expanded=False):
+        if _om_linea.empty:
+            st.caption("No hay órdenes de esta línea en el último export de IW38.")
+        else:
+            st.dataframe(
+                _om_linea[["orden", "texto", "estado", "inicio", "fin", "puesto", "atrasada"]]
+                .sort_values(["atrasada", "fin"], ascending=[False, True])
+                .rename(columns={"orden": "OM/OT", "texto": "Texto breve", "estado": "Estado",
+                                 "inicio": "Inicio", "fin": "Fin", "puesto": "Puesto",
+                                 "atrasada": "Atrasada"}),
+                hide_index=True, width="stretch")
+        st.caption(f"Fuente: {info_sap.get('om', 'export IW38')}")
 
 # ===============================
 # FORMULARIO DE INGRESO
@@ -637,6 +730,10 @@ with st.expander(f"📝 Registrar Nueva Reunión / Turno para {linea_activa}", e
             num_averias = st.number_input("Número de Averías Reportadas", min_value=0, step=1)
             avisos_creados = st.number_input("Avisos SAP/Sistema Creados", min_value=0, step=1)
             om_creadas = st.number_input("Órdenes de Mantención (OM) Ejecutadas/Guardadas", min_value=0, step=1)
+            sap_ordenes = st.text_input("N° OM / OT en SAP (opcional)",
+                                        help="Si son varias, sepáralas con coma. Ej: 40775555, 78041538")
+            sap_solped = st.text_input("N° SP (opcional)",
+                                       help="Solicitudes de pedido de repuestos de estas tareas. Varias: sepáralas con coma.")
 
             st.markdown("---")
             st.markdown("### 🔴 Gestión de Tarjetas")
@@ -747,7 +844,9 @@ if boton_enviar:
         "MTTR_min": mttr_in,
         "MTBF_h": mtbf_in,
         "Disponibilidad_pct": disp_in,
-        "Preventivo_Adjunto": adjunto_meta
+        "Preventivo_Adjunto": adjunto_meta,
+        "SAP_Ordenes": ", ".join(numeros_sap(sap_ordenes)),
+        "SAP_SolPed": ", ".join(numeros_sap(sap_solped))
     }
 
     df_historico = pd.concat([df_historico, pd.DataFrame([nueva_fila])], ignore_index=True)
@@ -795,6 +894,11 @@ if not df_linea.empty:
             st.metric("📨 Avisos Generados", int(registro_dia['Avisos_Creados']))
             st.metric("⚙️ Órdenes de Mantención (OM)", int(registro_dia['OM_Creadas']))
             st.metric("📈 Eficiencia del Día", f"{int(registro_dia['Eficiencia_Diaria'])}%")
+            _estado_sap = lineas_estado_sap(registro_dia)
+            if _estado_sap:
+                st.markdown("**🔗 Estado en SAP**")
+                for _t in _estado_sap:
+                    st.caption(_t)
             if pd.notna(registro_dia['Fecha_Cierre']):
                 dias_demora = (registro_dia['Fecha_Cierre'] - registro_dia['Fecha']).days
                 st.metric("⏱️ Demora en Ejecutarla", f"{dias_demora} día(s)")
@@ -920,6 +1024,13 @@ if not df_linea.empty:
         st.rerun()
 else:
     st.info("No hay registros para eliminar en esta línea.")
+
+# ===============================
+# DATOS SAP: CARGA Y CONSULTA (IW38 / ME5A)
+# ===============================
+st.divider()
+with st.expander("📥 Datos SAP: cargar exports de IW38 y ME5A / consultar todo", expanded=False):
+    mostrar_modulo_sap(al_subir=guardar_export_sap, info_carga=info_sap)
 
 # ===============================
 # GRÁFICOS
